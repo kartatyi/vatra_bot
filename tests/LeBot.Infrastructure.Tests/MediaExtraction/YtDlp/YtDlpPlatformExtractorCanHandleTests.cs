@@ -20,6 +20,8 @@ public class YtDlpPlatformExtractorCanHandleTests
     [InlineData("https://tiktok.com/@user/video/123")]
     [InlineData("https://www.tiktok.com/@user/video/123")]
     [InlineData("https://vm.tiktok.com/abc")]
+    [InlineData("https://vt.tiktok.com/ZSxbGhG4R/")]
+    [InlineData("https://m.tiktok.com/v/123")]
     [InlineData("https://youtube.com/shorts/abc")]
     [InlineData("https://www.youtube.com/watch?v=abc")]
     [InlineData("https://youtu.be/abc")]

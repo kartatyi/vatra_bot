@@ -20,6 +20,8 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
     {
         "tiktok.com",
         "vm.tiktok.com",
+        "vt.tiktok.com",
+        "m.tiktok.com",
         "youtube.com",
         "youtu.be",
         "instagram.com",
