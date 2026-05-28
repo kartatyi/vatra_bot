@@ -29,6 +29,7 @@ public class HandleIncomingMessageHandlerTests
 
         await _extractor.DidNotReceiveWithAnyArgs().ExtractAsync(default!, default);
         await _messenger.DidNotReceiveWithAnyArgs().ReplyWithMediaAsync(default, default, default!, default);
+        await _messenger.DidNotReceiveWithAnyArgs().ReplyWithTextAsync(default, default, default!, default);
     }
 
     [Fact]
@@ -42,6 +43,7 @@ public class HandleIncomingMessageHandlerTests
 
         await _extractor.DidNotReceiveWithAnyArgs().ExtractAsync(default!, default);
         await _messenger.DidNotReceiveWithAnyArgs().ReplyWithMediaAsync(default, default, default!, default);
+        await _messenger.DidNotReceiveWithAnyArgs().ReplyWithTextAsync(default, default, default!, default);
     }
 
     [Fact]
@@ -76,6 +78,42 @@ public class HandleIncomingMessageHandlerTests
         await CreateSut().HandleAsync(Message(), CancellationToken.None);
 
         await _messenger.DidNotReceiveWithAnyArgs().ReplyWithMediaAsync(default, default, default!, default);
+        await _messenger.DidNotReceiveWithAnyArgs().ReplyWithTextAsync(default, default, default!, default);
+    }
+
+    [Fact]
+    public async Task HandleAsync_NoMediaButDescription_SendsTextReply()
+    {
+        var url = new Uri("https://example.com/x");
+        var payload = new MediaPayload(url, null, "saab", [], Description: "Gripen announcement body text");
+
+        _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
+        _extractor.CanHandle(url).Returns(true);
+        _extractor.ExtractAsync(url, Arg.Any<CancellationToken>())
+            .Returns(Result<MediaPayload, ExtractionError>.Success(payload));
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        await _messenger.Received(1).ReplyWithTextAsync(
+            123L, 7, payload, Arg.Any<CancellationToken>());
+        await _messenger.DidNotReceiveWithAnyArgs().ReplyWithMediaAsync(default, default, default!, default);
+    }
+
+    [Fact]
+    public async Task HandleAsync_NoMediaButTitleOnly_SendsTextReply()
+    {
+        var url = new Uri("https://example.com/x");
+        var payload = new MediaPayload(url, Title: "Just a title", Author: null, Items: []);
+
+        _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
+        _extractor.CanHandle(url).Returns(true);
+        _extractor.ExtractAsync(url, Arg.Any<CancellationToken>())
+            .Returns(Result<MediaPayload, ExtractionError>.Success(payload));
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        await _messenger.Received(1).ReplyWithTextAsync(
+            123L, 7, payload, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -92,6 +130,7 @@ public class HandleIncomingMessageHandlerTests
         await CreateSut().HandleAsync(Message(), CancellationToken.None);
 
         await _messenger.DidNotReceiveWithAnyArgs().ReplyWithMediaAsync(default, default, default!, default);
+        await _messenger.DidNotReceiveWithAnyArgs().ReplyWithTextAsync(default, default, default!, default);
     }
 
     [Fact]

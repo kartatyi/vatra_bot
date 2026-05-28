@@ -5,6 +5,7 @@ using LeBot.Infrastructure.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using YoutubeDLSharp;
+using YoutubeDLSharp.Options;
 
 namespace LeBot.Infrastructure.MediaExtraction.YtDlp;
 
@@ -112,9 +113,11 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
         // so any shell metacharacters from the user message are escaped before yt-dlp sees them.
         var sanitisedUrl = url.AbsoluteUri;
 
+        var optionSet = BuildOptionSet();
+
         try
         {
-            var metadata = await _ytdl.RunVideoDataFetch(sanitisedUrl, ct: cancellationToken);
+            var metadata = await _ytdl.RunVideoDataFetch(sanitisedUrl, ct: cancellationToken, overrideOptions: optionSet);
             if (!metadata.Success || metadata.Data is null)
             {
                 var detail = JoinErrors(metadata.ErrorOutput);
@@ -162,7 +165,8 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
             var download = await _ytdl.RunVideoDownload(
                 sanitisedUrl,
                 format: "best[ext=mp4]/best",
-                ct: cancellationToken);
+                ct: cancellationToken,
+                overrideOptions: optionSet);
             if (!download.Success || string.IsNullOrEmpty(download.Data))
             {
                 var detail = JoinErrors(download.ErrorOutput);
@@ -192,7 +196,7 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
 
             var item = new MediaItem(
                 FilePath: filePath,
-                Kind: MediaKind.Video,
+                Kind: DetermineKind(filePath),
                 MimeType: GuessMimeType(filePath),
                 SizeBytes: fileInfo.Length,
                 DurationSeconds: info.Duration is { } d ? (int)d : null);
@@ -223,6 +227,25 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
     }
+
+    private OptionSet BuildOptionSet()
+    {
+        var opts = new OptionSet();
+        if (!string.IsNullOrEmpty(_options.CookiesFromBrowser))
+        {
+            opts.CookiesFromBrowser = _options.CookiesFromBrowser;
+        }
+        return opts;
+    }
+
+    private static MediaKind DetermineKind(string filePath) => Path.GetExtension(filePath).ToLowerInvariant() switch
+    {
+        ".mp4" or ".webm" or ".mov" or ".mkv" => MediaKind.Video,
+        ".jpg" or ".jpeg" or ".png" or ".webp" => MediaKind.Photo,
+        ".gif" => MediaKind.Animation,
+        ".mp3" or ".m4a" or ".ogg" or ".wav" => MediaKind.Audio,
+        _ => MediaKind.Video,
+    };
 
     private static string GuessMimeType(string filePath) => Path.GetExtension(filePath).ToLowerInvariant() switch
     {

@@ -55,6 +55,17 @@ public sealed class HandleIncomingMessageHandler(
                     ok.Value.Items.Count, url, message.ChatId);
                 break;
 
+            case Result<MediaPayload, ExtractionError>.Ok ok when HasReplyableText(ok.Value):
+                await messenger.ReplyWithTextAsync(
+                    message.ChatId,
+                    message.MessageId,
+                    ok.Value,
+                    cancellationToken);
+                logger.LogInformation(
+                    "Reposted text body from {Url} into chat {ChatId}",
+                    url, message.ChatId);
+                break;
+
             case Result<MediaPayload, ExtractionError>.Ok:
                 logger.LogInformation("Extractor returned no media for {Url}", url);
                 break;
@@ -65,5 +76,11 @@ public sealed class HandleIncomingMessageHandler(
                     url, err.Error.Reason);
                 break;
         }
+    }
+
+    private static bool HasReplyableText(MediaPayload payload)
+    {
+        return !string.IsNullOrWhiteSpace(payload.Description)
+            || !string.IsNullOrWhiteSpace(payload.Title);
     }
 }

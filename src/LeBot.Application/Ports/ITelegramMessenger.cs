@@ -8,8 +8,15 @@ namespace LeBot.Application.Ports;
 /// </summary>
 public interface ITelegramMessenger
 {
-    /// <summary>Posts the payload as a reply to a specific message in a specific chat.</summary>
+    /// <summary>Posts the media items in the payload as a reply (caption holds the payload's body text).</summary>
     Task ReplyWithMediaAsync(
+        long chatId,
+        int replyToMessageId,
+        MediaPayload payload,
+        CancellationToken cancellationToken);
+
+    /// <summary>Posts the payload's body text (description / title / author) as a text-only reply.</summary>
+    Task ReplyWithTextAsync(
         long chatId,
         int replyToMessageId,
         MediaPayload payload,

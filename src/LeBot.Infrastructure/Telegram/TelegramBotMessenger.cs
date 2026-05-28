@@ -23,7 +23,7 @@ public sealed class TelegramBotMessenger(
         MediaPayload payload,
         CancellationToken cancellationToken)
     {
-        var caption = BuildCaption(payload);
+        var caption = BuildBody(payload, MaxCaptionLength);
         var reply = new ReplyParameters { MessageId = replyToMessageId };
 
         foreach (var item in payload.Items)
@@ -49,6 +49,25 @@ public sealed class TelegramBotMessenger(
                 BestEffortDelete(item.FilePath);
             }
         }
+    }
+
+    public async Task ReplyWithTextAsync(
+        long chatId,
+        int replyToMessageId,
+        MediaPayload payload,
+        CancellationToken cancellationToken)
+    {
+        var body = BuildBody(payload, MaxTextLength);
+        if (string.IsNullOrEmpty(body))
+        {
+            return;
+        }
+
+        await bot.SendMessage(
+            chatId: chatId,
+            text: body,
+            replyParameters: new ReplyParameters { MessageId = replyToMessageId },
+            cancellationToken: cancellationToken);
     }
 
     private async Task SendItemAsync(
@@ -117,10 +136,11 @@ public sealed class TelegramBotMessenger(
         }
     }
 
-    // Telegram caps captions on media messages at 1024 characters.
+    // Telegram caps captions on media messages at 1024 chars; standalone text messages at 4096.
     private const int MaxCaptionLength = 1024;
+    private const int MaxTextLength = 4096;
 
-    private static string? BuildCaption(MediaPayload payload)
+    private static string? BuildBody(MediaPayload payload, int maxLength)
     {
         // Prefer the description (the actual post body — what the user wrote on IG, TikTok, etc.)
         // over the title (which yt-dlp often synthesises as "Video by <uploader>" for short-form).
@@ -134,7 +154,7 @@ public sealed class TelegramBotMessenger(
             ? payload.Author.Trim()
             : null;
 
-        var caption = (primary, author) switch
+        var body = (primary, author) switch
         {
             (string p, string a) => $"{p}\n\n— {a}",
             (string p, null) => p,
@@ -142,13 +162,13 @@ public sealed class TelegramBotMessenger(
             _ => null,
         };
 
-        if (caption is null)
+        if (body is null)
         {
             return null;
         }
 
-        return caption.Length > MaxCaptionLength
-            ? caption[..(MaxCaptionLength - 1)] + "…"
-            : caption;
+        return body.Length > maxLength
+            ? body[..(maxLength - 1)] + "…"
+            : body;
     }
 }

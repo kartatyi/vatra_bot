@@ -13,6 +13,14 @@ public sealed class YtDlpOptions
     /// <summary>Optional ffmpeg path; required only for formats yt-dlp must merge or transcode.</summary>
     public string? FfmpegPath { get; init; }
 
+    /// <summary>
+    /// Browser name (firefox / chrome / edge / brave / ...) whose session cookies yt-dlp should
+    /// borrow. Lets the bot see content gated behind login on platforms like Instagram (image
+    /// posts) and X. Leave null for anonymous extraction. Set via user-secrets or env:
+    /// <c>dotnet user-secrets set "YtDlp:CookiesFromBrowser" "firefox" --project src/LeBot.Host</c>.
+    /// </summary>
+    public string? CookiesFromBrowser { get; init; }
+
     /// <summary>Where downloaded files land. Cleaned up after sending.</summary>
     public string DownloadDirectory { get; init; } = "downloads";
 
