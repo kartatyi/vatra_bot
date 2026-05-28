@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using LeBot.Application.Ports;
@@ -6,6 +7,8 @@ using LeBot.Domain.Media;
 using LeBot.Infrastructure.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Polly;
+using Polly.Retry;
 
 namespace LeBot.Infrastructure.MediaExtraction.InstagramEmbed;
 
@@ -36,6 +39,7 @@ public sealed partial class InstagramEmbedExtractor : IPlatformExtractor
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly YtDlpOptions _options;
     private readonly ILogger<InstagramEmbedExtractor> _logger;
+    private readonly ResiliencePipeline<HttpResponseMessage> _retryPipeline;
 
     public InstagramEmbedExtractor(
         IHttpClientFactory httpClientFactory,
@@ -47,7 +51,36 @@ public sealed partial class InstagramEmbedExtractor : IPlatformExtractor
         _logger = logger;
 
         Directory.CreateDirectory(_options.DownloadDirectory);
+
+        _retryPipeline = new ResiliencePipelineBuilder<HttpResponseMessage>()
+            .AddRetry(new RetryStrategyOptions<HttpResponseMessage>
+            {
+                ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
+                    .Handle<HttpRequestException>()
+                    .Handle<TaskCanceledException>(ex => ex.InnerException is TimeoutException)
+                    .HandleResult(static r => IsTransientStatus(r.StatusCode)),
+                MaxRetryAttempts = 2,
+                BackoffType = DelayBackoffType.Exponential,
+                Delay = TimeSpan.FromMilliseconds(300),
+                MaxDelay = TimeSpan.FromSeconds(5),
+                UseJitter = true,
+                OnRetry = args =>
+                {
+                    _logger.LogWarning(
+                        "Retrying Instagram embed HTTP call (attempt {Attempt} after {DelayMs}ms): {Reason}",
+                        args.AttemptNumber + 1,
+                        args.RetryDelay.TotalMilliseconds,
+                        args.Outcome.Exception?.Message ?? $"status {args.Outcome.Result?.StatusCode}");
+                    return ValueTask.CompletedTask;
+                },
+            })
+            .Build();
     }
+
+    private static bool IsTransientStatus(HttpStatusCode status) =>
+        status == HttpStatusCode.RequestTimeout
+        || status == HttpStatusCode.TooManyRequests
+        || ((int)status >= 500 && (int)status < 600);
 
     public bool CanHandle(Uri url)
     {
@@ -70,10 +103,13 @@ public sealed partial class InstagramEmbedExtractor : IPlatformExtractor
 
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, embedUri);
-            request.Headers.UserAgent.ParseAdd(BrowserUserAgent);
+            using var response = await _retryPipeline.ExecuteAsync(async token =>
+            {
+                var request = new HttpRequestMessage(HttpMethod.Get, embedUri);
+                request.Headers.UserAgent.ParseAdd(BrowserUserAgent);
+                return await client.SendAsync(request, token);
+            }, cancellationToken);
 
-            using var response = await client.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning(
@@ -237,10 +273,13 @@ public sealed partial class InstagramEmbedExtractor : IPlatformExtractor
     {
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, imageUrl);
-            request.Headers.UserAgent.ParseAdd(BrowserUserAgent);
+            using var response = await _retryPipeline.ExecuteAsync(async token =>
+            {
+                var request = new HttpRequestMessage(HttpMethod.Get, imageUrl);
+                request.Headers.UserAgent.ParseAdd(BrowserUserAgent);
+                return await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
+            }, cancellationToken);
 
-            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning(
