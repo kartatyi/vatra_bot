@@ -128,17 +128,38 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
 
             var info = metadata.Data;
 
-            // Some posts (Instagram image carousels, text-only Threads, etc.) come back as
-            // playlists with zero entries — yt-dlp has nothing to download. Surface this as
-            // an empty payload, not a failure: the source link's native Telegram preview is
-            // already in the chat, and adding a "tool failure" log line would be noise.
+            // Some posts (Instagram image carousels seen anonymously, text-only Threads, etc.)
+            // come back as playlists with zero entries — yt-dlp has nothing to download. Surface
+            // this as an empty payload, not a failure: the source link's native Telegram preview
+            // is already in the chat, and adding a "tool failure" log line would be noise.
             if (info.Entries is { Length: 0 })
             {
                 _logger.LogInformation(
-                    "Skipping {Url}: post has no playable media (likely image-only or text-only)",
+                    "Skipping {Url}: post has no playable media (likely image-only or text-only without auth)",
                     url);
                 return Result<MediaPayload, ExtractionError>.Success(
                     new MediaPayload(url, info.Title, info.Uploader, [], info.Description));
+            }
+
+            // Multi-entry playlist. If every entry has no downloadable formats (the typical
+            // Instagram image-carousel shape with --ignore-no-formats-error), we won't get
+            // anything by trying to download. Skip straight to the text-only payload so the
+            // chain can use the metadata's title/description as a reply.
+            if (info.Entries is { Length: > 0 } entries)
+            {
+                if (AllEntriesHaveNoFormats(entries))
+                {
+                    _logger.LogInformation(
+                        "Skipping {Url}: playlist entries carry no downloadable formats — surfacing text only",
+                        url);
+                    return Result<MediaPayload, ExtractionError>.Success(
+                        new MediaPayload(url, info.Title, info.Uploader, [], info.Description));
+                }
+
+                if (entries.Length > 1)
+                {
+                    return await DownloadPlaylistAsync(url, sanitisedUrl, info, optionSet, cancellationToken);
+                }
             }
 
             var maxBytes = (long)_options.MaxFileSizeMb * 1024 * 1024;
@@ -235,7 +256,78 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
         {
             opts.CookiesFromBrowser = _options.CookiesFromBrowser;
         }
+        // Without this, Instagram image carousels (which surface as playlist entries
+        // with empty formats) make yt-dlp fail metadata fetch entirely. We'd rather get
+        // the title and description back and surface them as a text reply than swallow
+        // them with a hard failure.
+        opts.AddCustomOption("--ignore-no-formats-error", true);
         return opts;
+    }
+
+    private async Task<Result<MediaPayload, ExtractionError>> DownloadPlaylistAsync(
+        Uri url,
+        string sanitisedUrl,
+        YoutubeDLSharp.Metadata.VideoData info,
+        OptionSet optionSet,
+        CancellationToken cancellationToken)
+    {
+        var playlistResult = await _ytdl.RunVideoPlaylistDownload(
+            sanitisedUrl,
+            format: "best[ext=mp4]/best",
+            ct: cancellationToken,
+            overrideOptions: optionSet);
+
+        if (!playlistResult.Success || playlistResult.Data is null or { Length: 0 })
+        {
+            var detail = JoinErrors(playlistResult.ErrorOutput);
+            _logger.LogWarning("yt-dlp playlist download failed for {Url}: {Detail}", url, detail);
+            return Result<MediaPayload, ExtractionError>.Failure(
+                new ExtractionError.ToolFailure(detail));
+        }
+
+        var maxBytes = (long)_options.MaxFileSizeMb * 1024 * 1024;
+        var items = new List<MediaItem>(playlistResult.Data.Length);
+
+        foreach (var filePath in playlistResult.Data)
+        {
+            if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
+            {
+                _logger.LogWarning("Playlist entry path is missing or empty: {Path}", filePath);
+                continue;
+            }
+
+            var fileInfo = new FileInfo(filePath);
+            if (fileInfo.Length > maxBytes)
+            {
+                _logger.LogInformation(
+                    "Dropping {Path} from album: size {SizeMb}MB exceeds limit {LimitMb}MB",
+                    filePath, fileInfo.Length / (1024 * 1024), _options.MaxFileSizeMb);
+                BestEffortDelete(filePath);
+                continue;
+            }
+
+            items.Add(new MediaItem(
+                FilePath: filePath,
+                Kind: DetermineKind(filePath),
+                MimeType: GuessMimeType(filePath),
+                SizeBytes: fileInfo.Length,
+                DurationSeconds: null));
+        }
+
+        return Result<MediaPayload, ExtractionError>.Success(
+            new MediaPayload(url, info.Title, info.Uploader, items, info.Description));
+    }
+
+    private static bool AllEntriesHaveNoFormats(YoutubeDLSharp.Metadata.VideoData[] entries)
+    {
+        foreach (var entry in entries)
+        {
+            if (entry.Formats is { Length: > 0 })
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static MediaKind DetermineKind(string filePath) => Path.GetExtension(filePath).ToLowerInvariant() switch

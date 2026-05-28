@@ -17,34 +17,122 @@ public sealed class TelegramBotMessenger(
     ILogger<TelegramBotMessenger> logger)
     : ITelegramMessenger
 {
+    // Telegram media groups must contain 2-10 items.
+    private const int MaxAlbumSize = 10;
+
     public async Task ReplyWithMediaAsync(
         long chatId,
         int replyToMessageId,
         MediaPayload payload,
         CancellationToken cancellationToken)
     {
+        if (payload.Items.Count == 0)
+        {
+            return;
+        }
+
         var caption = BuildBody(payload, MaxCaptionLength);
         var reply = new ReplyParameters { MessageId = replyToMessageId };
 
-        foreach (var item in payload.Items)
+        if (payload.Items.Count == 1)
         {
+            await SendSingleAsync(chatId, reply, payload.Items[0], caption, payload.SourceUrl, cancellationToken);
+        }
+        else
+        {
+            await SendAlbumAsync(chatId, reply, payload.Items, caption, payload.SourceUrl, cancellationToken);
+        }
+    }
+
+    private async Task SendSingleAsync(
+        long chatId,
+        ReplyParameters reply,
+        MediaItem item,
+        string? caption,
+        Uri sourceUrl,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await SendItemAsync(chatId, reply, item, caption, cancellationToken);
+        }
+        catch (ApiRequestException ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Telegram refused media (code {ErrorCode}): {Message}. Falling back to source link.",
+                ex.ErrorCode, ex.Message);
+            await bot.SendMessage(
+                chatId: chatId,
+                text: $"Couldn't repost the media. Source: {sourceUrl}",
+                replyParameters: reply,
+                cancellationToken: cancellationToken);
+        }
+        finally
+        {
+            BestEffortDelete(item.FilePath);
+        }
+    }
+
+    private async Task SendAlbumAsync(
+        long chatId,
+        ReplyParameters reply,
+        IReadOnlyList<MediaItem> items,
+        string? caption,
+        Uri sourceUrl,
+        CancellationToken cancellationToken)
+    {
+        var batch = items.Count > MaxAlbumSize ? items.Take(MaxAlbumSize).ToList() : items;
+        var streams = new List<FileStream>(batch.Count);
+
+        try
+        {
+            var album = new List<IAlbumInputMedia>(batch.Count);
+            for (var i = 0; i < batch.Count; i++)
+            {
+                var item = batch[i];
+                var stream = File.OpenRead(item.FilePath);
+                streams.Add(stream);
+                var inputFile = InputFile.FromStream(stream, Path.GetFileName(item.FilePath));
+                var itemCaption = i == 0 ? caption : null;
+
+                IAlbumInputMedia media = item.Kind switch
+                {
+                    MediaKind.Photo => new InputMediaPhoto(inputFile) { Caption = itemCaption },
+                    MediaKind.Video => new InputMediaVideo(inputFile) { Caption = itemCaption },
+                    _ => new InputMediaDocument(inputFile) { Caption = itemCaption },
+                };
+                album.Add(media);
+            }
+
             try
             {
-                await SendItemAsync(chatId, reply, item, caption, cancellationToken);
+                await bot.SendMediaGroup(
+                    chatId: chatId,
+                    media: album,
+                    replyParameters: reply,
+                    cancellationToken: cancellationToken);
             }
             catch (ApiRequestException ex)
             {
                 logger.LogWarning(
                     ex,
-                    "Telegram refused media (code {ErrorCode}): {Message}. Falling back to source link.",
-                    ex.ErrorCode, ex.Message);
+                    "Telegram refused album of {Count} items (code {ErrorCode}): {Message}. Falling back to source link.",
+                    batch.Count, ex.ErrorCode, ex.Message);
                 await bot.SendMessage(
                     chatId: chatId,
-                    text: $"Couldn't repost the media. Source: {payload.SourceUrl}",
+                    text: $"Couldn't repost the album. Source: {sourceUrl}",
                     replyParameters: reply,
                     cancellationToken: cancellationToken);
             }
-            finally
+        }
+        finally
+        {
+            foreach (var stream in streams)
+            {
+                await stream.DisposeAsync();
+            }
+            foreach (var item in items)
             {
                 BestEffortDelete(item.FilePath);
             }

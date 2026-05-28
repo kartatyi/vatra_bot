@@ -33,49 +33,78 @@ public sealed class HandleIncomingMessageHandler(
 
     private async Task ProcessUrlAsync(IncomingMessage message, Uri url, CancellationToken cancellationToken)
     {
-        var extractor = extractors.FirstOrDefault(e => e.CanHandle(url));
-        if (extractor is null)
+        var candidates = extractors.Where(e => e.CanHandle(url)).ToList();
+        if (candidates.Count == 0)
         {
             logger.LogDebug("No extractor for URL {Url}", url);
             return;
         }
 
-        var result = await extractor.ExtractAsync(url, cancellationToken);
+        MediaPayload? textFallback = null;
 
-        switch (result)
+        foreach (var extractor in candidates)
         {
-            case Result<MediaPayload, ExtractionError>.Ok ok when ok.Value.HasMedia:
-                await messenger.ReplyWithMediaAsync(
-                    message.ChatId,
-                    message.MessageId,
-                    ok.Value,
-                    cancellationToken);
-                logger.LogInformation(
-                    "Reposted {Count} media item(s) from {Url} into chat {ChatId}",
-                    ok.Value.Items.Count, url, message.ChatId);
-                break;
+            cancellationToken.ThrowIfCancellationRequested();
 
-            case Result<MediaPayload, ExtractionError>.Ok ok when HasReplyableText(ok.Value):
-                await messenger.ReplyWithTextAsync(
-                    message.ChatId,
-                    message.MessageId,
-                    ok.Value,
-                    cancellationToken);
-                logger.LogInformation(
-                    "Reposted text body from {Url} into chat {ChatId}",
-                    url, message.ChatId);
-                break;
+            var result = await extractor.ExtractAsync(url, cancellationToken);
+            switch (result)
+            {
+                case Result<MediaPayload, ExtractionError>.Ok ok when ok.Value.HasMedia:
+                    await messenger.ReplyWithMediaAsync(
+                        message.ChatId,
+                        message.MessageId,
+                        ok.Value,
+                        cancellationToken);
+                    logger.LogInformation(
+                        "Reposted {Count} media item(s) from {Url} via {Extractor} into chat {ChatId}",
+                        ok.Value.Items.Count, url, extractor.GetType().Name, message.ChatId);
+                    return;
 
-            case Result<MediaPayload, ExtractionError>.Ok:
-                logger.LogInformation("Extractor returned no media for {Url}", url);
-                break;
+                case Result<MediaPayload, ExtractionError>.Ok ok when HasReplyableText(ok.Value):
+                    textFallback ??= ok.Value;
+                    break;
 
-            case Result<MediaPayload, ExtractionError>.Err err:
-                logger.LogWarning(
-                    "Failed to extract media from {Url}: {Reason}",
-                    url, err.Error.Reason);
-                break;
+                case Result<MediaPayload, ExtractionError>.Err err:
+                    logger.LogWarning(
+                        "{Extractor} failed for {Url}: {Reason}",
+                        extractor.GetType().Name, url, err.Error.Reason);
+                    break;
+
+                case Result<MediaPayload, ExtractionError>.Ok:
+                    // Extractor returned nothing usable; try the next candidate.
+                    break;
+            }
         }
+
+        if (textFallback is not null)
+        {
+            await messenger.ReplyWithTextAsync(
+                message.ChatId,
+                message.MessageId,
+                textFallback,
+                cancellationToken);
+            logger.LogInformation(
+                "Reposted text body from {Url} into chat {ChatId}",
+                url, message.ChatId);
+            return;
+        }
+
+        // Final acknowledgement so the user always sees a reply for any URL we recognised but
+        // couldn't extract — none of the extractors produced media or salvageable text.
+        var fallback = new MediaPayload(
+            SourceUrl: url,
+            Title: null,
+            Author: null,
+            Items: [],
+            Description: "Couldn't extract media from this link.");
+        await messenger.ReplyWithTextAsync(
+            message.ChatId,
+            message.MessageId,
+            fallback,
+            cancellationToken);
+        logger.LogInformation(
+            "Sent extraction-failed acknowledgement for {Url} into chat {ChatId}",
+            url, message.ChatId);
     }
 
     private static bool HasReplyableText(MediaPayload payload)

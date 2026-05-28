@@ -1,5 +1,6 @@
 using LeBot.Application.Ports;
 using LeBot.Infrastructure.Configuration;
+using LeBot.Infrastructure.MediaExtraction.InstagramEmbed;
 using LeBot.Infrastructure.MediaExtraction.YtDlp;
 using LeBot.Infrastructure.Telegram;
 using LeBot.Infrastructure.Text;
@@ -34,8 +35,17 @@ public static class DependencyInjection
             return new TelegramBotClient(token);
         });
 
+        services.AddHttpClient();
+
         services.AddSingleton<ITelegramMessenger, TelegramBotMessenger>();
         services.AddSingleton<IUrlExtractor, RegexUrlExtractor>();
+
+        // Order matters: extractors are tried in the order they're registered. InstagramEmbedExtractor
+        // takes the first crack at Instagram /p/ posts because yt-dlp's Instagram extractor doesn't
+        // surface image URLs from carousels even with cookies. YtDlpPlatformExtractor handles everything
+        // else (reels, all other supported hosts) and also acts as a fallback when the embed scrape
+        // returns nothing useful.
+        services.AddSingleton<IPlatformExtractor, InstagramEmbedExtractor>();
         services.AddSingleton<IPlatformExtractor, YtDlpPlatformExtractor>();
 
         services.AddHostedService<TelegramUpdateDispatcher>();

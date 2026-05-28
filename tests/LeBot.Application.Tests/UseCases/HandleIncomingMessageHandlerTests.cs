@@ -65,7 +65,7 @@ public class HandleIncomingMessageHandlerTests
     }
 
     [Fact]
-    public async Task HandleAsync_EmptyPayload_SkipsMessenger()
+    public async Task HandleAsync_EmptyPayload_SendsFallbackAcknowledgement()
     {
         var url = new Uri("https://example.com/x");
         var payload = new MediaPayload(url, null, null, []);
@@ -78,7 +78,10 @@ public class HandleIncomingMessageHandlerTests
         await CreateSut().HandleAsync(Message(), CancellationToken.None);
 
         await _messenger.DidNotReceiveWithAnyArgs().ReplyWithMediaAsync(default, default, default!, default);
-        await _messenger.DidNotReceiveWithAnyArgs().ReplyWithTextAsync(default, default, default!, default);
+        await _messenger.Received(1).ReplyWithTextAsync(
+            123L, 7,
+            Arg.Is<MediaPayload>(p => p.SourceUrl == url && !string.IsNullOrEmpty(p.Description) && p.Items.Count == 0),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -117,7 +120,7 @@ public class HandleIncomingMessageHandlerTests
     }
 
     [Fact]
-    public async Task HandleAsync_ExtractorFails_DoesNotCallMessenger()
+    public async Task HandleAsync_ExtractorFails_SendsFallbackAcknowledgement()
     {
         var url = new Uri("https://example.com/x");
         var error = new ExtractionError.ContentUnavailable(url, "gone");
@@ -130,7 +133,62 @@ public class HandleIncomingMessageHandlerTests
         await CreateSut().HandleAsync(Message(), CancellationToken.None);
 
         await _messenger.DidNotReceiveWithAnyArgs().ReplyWithMediaAsync(default, default, default!, default);
+        await _messenger.Received(1).ReplyWithTextAsync(
+            123L, 7,
+            Arg.Is<MediaPayload>(p => p.SourceUrl == url && !string.IsNullOrEmpty(p.Description)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleAsync_FirstExtractorFails_SecondExtractorSucceeds_SendsItsMedia()
+    {
+        var url = new Uri("https://instagram.com/p/abc/");
+        var item = new MediaItem("/tmp/x.jpg", MediaKind.Photo, "image/jpeg", 100, null);
+        var goodPayload = new MediaPayload(url, null, "saab", [item], "post body");
+
+        var first = Substitute.For<IPlatformExtractor>();
+        first.CanHandle(url).Returns(true);
+        first.ExtractAsync(url, Arg.Any<CancellationToken>())
+            .Returns(Result<MediaPayload, ExtractionError>.Failure(new ExtractionError.NetworkFailure(url, "boom")));
+
+        var second = Substitute.For<IPlatformExtractor>();
+        second.CanHandle(url).Returns(true);
+        second.ExtractAsync(url, Arg.Any<CancellationToken>())
+            .Returns(Result<MediaPayload, ExtractionError>.Success(goodPayload));
+
+        _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
+
+        var sut = new HandleIncomingMessageHandler(_urlExtractor, [first, second], _messenger, _logger);
+        await sut.HandleAsync(Message(), CancellationToken.None);
+
+        await _messenger.Received(1).ReplyWithMediaAsync(123L, 7, goodPayload, Arg.Any<CancellationToken>());
         await _messenger.DidNotReceiveWithAnyArgs().ReplyWithTextAsync(default, default, default!, default);
+    }
+
+    [Fact]
+    public async Task HandleAsync_FirstExtractorEmpty_SecondExtractorText_PrefersFirstText()
+    {
+        var url = new Uri("https://instagram.com/p/abc/");
+        var firstPayload = new MediaPayload(url, null, "first", [], "from first extractor");
+        var secondPayload = new MediaPayload(url, null, "second", [], "from second extractor");
+
+        var first = Substitute.For<IPlatformExtractor>();
+        first.CanHandle(url).Returns(true);
+        first.ExtractAsync(url, Arg.Any<CancellationToken>())
+            .Returns(Result<MediaPayload, ExtractionError>.Success(firstPayload));
+
+        var second = Substitute.For<IPlatformExtractor>();
+        second.CanHandle(url).Returns(true);
+        second.ExtractAsync(url, Arg.Any<CancellationToken>())
+            .Returns(Result<MediaPayload, ExtractionError>.Success(secondPayload));
+
+        _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
+
+        var sut = new HandleIncomingMessageHandler(_urlExtractor, [first, second], _messenger, _logger);
+        await sut.HandleAsync(Message(), CancellationToken.None);
+
+        // Both ran (no media wins, so chain keeps going); first text wins as primary fallback.
+        await _messenger.Received(1).ReplyWithTextAsync(123L, 7, firstPayload, Arg.Any<CancellationToken>());
     }
 
     [Fact]
