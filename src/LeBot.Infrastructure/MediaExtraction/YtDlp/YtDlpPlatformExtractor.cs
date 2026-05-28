@@ -50,14 +50,47 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
 
         _ytdl = new YoutubeDL
         {
-            YoutubeDLPath = _options.BinaryPath,
+            YoutubeDLPath = ResolveExecutablePath(_options.BinaryPath),
             OutputFolder = _options.DownloadDirectory,
         };
 
         if (!string.IsNullOrEmpty(_options.FfmpegPath))
         {
-            _ytdl.FFmpegPath = _options.FfmpegPath;
+            _ytdl.FFmpegPath = ResolveExecutablePath(_options.FfmpegPath);
         }
+    }
+
+    /// <summary>
+    /// Resolves a relative tool path against the current working directory first
+    /// (this is what works when the bot is launched from the repo root) and then
+    /// by walking up from the assembly base directory until the file is found
+    /// (this is what works under <c>dotnet run --project src/LeBot.Host</c>,
+    /// where the CWD is set to the project folder several levels below the repo root).
+    /// Absolute paths are returned as-is.
+    /// </summary>
+    private static string ResolveExecutablePath(string configured)
+    {
+        if (string.IsNullOrEmpty(configured) || Path.IsPathRooted(configured))
+        {
+            return configured;
+        }
+
+        var cwdRelative = Path.GetFullPath(configured);
+        if (File.Exists(cwdRelative))
+        {
+            return cwdRelative;
+        }
+
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            var candidate = Path.Combine(dir.FullName, configured);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return configured;
     }
 
     public bool CanHandle(Uri url)
@@ -108,7 +141,14 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
                     new MediaPayload(url, info.Title, info.Uploader, []));
             }
 
-            var download = await _ytdl.RunVideoDownload(sanitisedUrl, ct: cancellationToken);
+            // Prefer a pre-merged single-file format so we don't need ffmpeg to glue DASH
+            // video and audio streams (Instagram and some other platforms only expose DASH;
+            // without this selector yt-dlp grabs both streams and then "succeeds" with no
+            // merged file present on disk).
+            var download = await _ytdl.RunVideoDownload(
+                sanitisedUrl,
+                format: "best[ext=mp4]/best",
+                ct: cancellationToken);
             if (!download.Success || string.IsNullOrEmpty(download.Data))
             {
                 var detail = JoinErrors(download.ErrorOutput);
