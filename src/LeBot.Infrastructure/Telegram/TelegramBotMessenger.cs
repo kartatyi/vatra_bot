@@ -1,6 +1,8 @@
 using LeBot.Application.Ports;
 using LeBot.Domain.Media;
 using Microsoft.Extensions.Logging;
+using Polly;
+using Polly.Retry;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Types;
@@ -9,16 +11,42 @@ namespace LeBot.Infrastructure.Telegram;
 
 /// <summary>
 /// Adapter over <see cref="ITelegramBotClient"/>. Picks the right send-method for each
-/// <see cref="MediaKind"/>, falls back to a plain source-URL reply when Telegram refuses
-/// the upload, and always cleans the local file after the attempt.
+/// <see cref="MediaKind"/>, retries transient Telegram failures with exponential backoff,
+/// falls back to a plain source-URL reply when the upload is permanently refused, and
+/// always cleans the local file after the attempt.
 /// </summary>
 public sealed class TelegramBotMessenger(
     ITelegramBotClient bot,
     ILogger<TelegramBotMessenger> logger)
     : ITelegramMessenger
 {
+    // Telegram caps captions on media messages at 1024 chars; standalone text messages at 4096.
+    private const int MaxCaptionLength = 1024;
+    private const int MaxTextLength = 4096;
+
     // Telegram media groups must contain 2-10 items.
     private const int MaxAlbumSize = 10;
+
+    private readonly ResiliencePipeline _retryPipeline = new ResiliencePipelineBuilder()
+        .AddRetry(new RetryStrategyOptions
+        {
+            ShouldHandle = new PredicateBuilder().Handle<ApiRequestException>(IsTransientTelegramError),
+            MaxRetryAttempts = 3,
+            BackoffType = DelayBackoffType.Exponential,
+            Delay = TimeSpan.FromMilliseconds(500),
+            MaxDelay = TimeSpan.FromSeconds(15),
+            UseJitter = true,
+            OnRetry = args =>
+            {
+                logger.LogWarning(
+                    "Retrying Telegram call: attempt {Attempt} after {DelayMs}ms ({Reason})",
+                    args.AttemptNumber + 1,
+                    args.RetryDelay.TotalMilliseconds,
+                    args.Outcome.Exception?.Message);
+                return ValueTask.CompletedTask;
+            },
+        })
+        .Build();
 
     public async Task ReplyWithMediaAsync(
         long chatId,
@@ -44,6 +72,25 @@ public sealed class TelegramBotMessenger(
         }
     }
 
+    public async Task ReplyWithTextAsync(
+        long chatId,
+        int replyToMessageId,
+        MediaPayload payload,
+        CancellationToken cancellationToken)
+    {
+        var body = BuildBody(payload, MaxTextLength);
+        if (string.IsNullOrEmpty(body))
+        {
+            return;
+        }
+
+        await SendWithRetryAsync(ct => bot.SendMessage(
+            chatId: chatId,
+            text: body,
+            replyParameters: new ReplyParameters { MessageId = replyToMessageId },
+            cancellationToken: ct), cancellationToken);
+    }
+
     private async Task SendSingleAsync(
         long chatId,
         ReplyParameters reply,
@@ -62,11 +109,11 @@ public sealed class TelegramBotMessenger(
                 ex,
                 "Telegram refused media (code {ErrorCode}): {Message}. Falling back to source link.",
                 ex.ErrorCode, ex.Message);
-            await bot.SendMessage(
+            await SendWithRetryAsync(ct => bot.SendMessage(
                 chatId: chatId,
                 text: $"Couldn't repost the media. Source: {sourceUrl}",
                 replyParameters: reply,
-                cancellationToken: cancellationToken);
+                cancellationToken: ct), cancellationToken);
         }
         finally
         {
@@ -107,11 +154,11 @@ public sealed class TelegramBotMessenger(
 
             try
             {
-                await bot.SendMediaGroup(
+                await SendWithRetryAsync(ct => bot.SendMediaGroup(
                     chatId: chatId,
                     media: album,
                     replyParameters: reply,
-                    cancellationToken: cancellationToken);
+                    cancellationToken: ct), cancellationToken);
             }
             catch (ApiRequestException ex)
             {
@@ -119,11 +166,11 @@ public sealed class TelegramBotMessenger(
                     ex,
                     "Telegram refused album of {Count} items (code {ErrorCode}): {Message}. Falling back to source link.",
                     batch.Count, ex.ErrorCode, ex.Message);
-                await bot.SendMessage(
+                await SendWithRetryAsync(ct => bot.SendMessage(
                     chatId: chatId,
                     text: $"Couldn't repost the album. Source: {sourceUrl}",
                     replyParameters: reply,
-                    cancellationToken: cancellationToken);
+                    cancellationToken: ct), cancellationToken);
             }
         }
         finally
@@ -139,25 +186,6 @@ public sealed class TelegramBotMessenger(
         }
     }
 
-    public async Task ReplyWithTextAsync(
-        long chatId,
-        int replyToMessageId,
-        MediaPayload payload,
-        CancellationToken cancellationToken)
-    {
-        var body = BuildBody(payload, MaxTextLength);
-        if (string.IsNullOrEmpty(body))
-        {
-            return;
-        }
-
-        await bot.SendMessage(
-            chatId: chatId,
-            text: body,
-            replyParameters: new ReplyParameters { MessageId = replyToMessageId },
-            cancellationToken: cancellationToken);
-    }
-
     private async Task SendItemAsync(
         long chatId,
         ReplyParameters reply,
@@ -171,39 +199,45 @@ public sealed class TelegramBotMessenger(
         switch (item.Kind)
         {
             case MediaKind.Video:
-                await bot.SendVideo(
+                await SendWithRetryAsync(ct => bot.SendVideo(
                     chatId: chatId,
                     video: inputFile,
                     caption: caption,
                     replyParameters: reply,
-                    cancellationToken: cancellationToken);
+                    cancellationToken: ct), cancellationToken);
                 break;
             case MediaKind.Photo:
-                await bot.SendPhoto(
+                await SendWithRetryAsync(ct => bot.SendPhoto(
                     chatId: chatId,
                     photo: inputFile,
                     caption: caption,
                     replyParameters: reply,
-                    cancellationToken: cancellationToken);
+                    cancellationToken: ct), cancellationToken);
                 break;
             case MediaKind.Animation:
-                await bot.SendAnimation(
+                await SendWithRetryAsync(ct => bot.SendAnimation(
                     chatId: chatId,
                     animation: inputFile,
                     caption: caption,
                     replyParameters: reply,
-                    cancellationToken: cancellationToken);
+                    cancellationToken: ct), cancellationToken);
                 break;
             case MediaKind.Audio:
-                await bot.SendAudio(
+                await SendWithRetryAsync(ct => bot.SendAudio(
                     chatId: chatId,
                     audio: inputFile,
                     caption: caption,
                     replyParameters: reply,
-                    cancellationToken: cancellationToken);
+                    cancellationToken: ct), cancellationToken);
                 break;
         }
     }
+
+    private ValueTask SendWithRetryAsync(Func<CancellationToken, Task> action, CancellationToken cancellationToken) =>
+        _retryPipeline.ExecuteAsync(async token => await action(token), cancellationToken);
+
+    private static bool IsTransientTelegramError(ApiRequestException ex) =>
+        ex.ErrorCode == 429 || ex.ErrorCode is >= 500 and < 600;
 
     private void BestEffortDelete(string filePath)
     {
@@ -223,10 +257,6 @@ public sealed class TelegramBotMessenger(
             logger.LogDebug(ex, "Could not delete {Path}", filePath);
         }
     }
-
-    // Telegram caps captions on media messages at 1024 chars; standalone text messages at 4096.
-    private const int MaxCaptionLength = 1024;
-    private const int MaxTextLength = 4096;
 
     private static string? BuildBody(MediaPayload payload, int maxLength)
     {
