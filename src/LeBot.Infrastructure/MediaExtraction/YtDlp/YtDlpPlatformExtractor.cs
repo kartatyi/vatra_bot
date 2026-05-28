@@ -124,6 +124,20 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
             }
 
             var info = metadata.Data;
+
+            // Some posts (Instagram image carousels, text-only Threads, etc.) come back as
+            // playlists with zero entries — yt-dlp has nothing to download. Surface this as
+            // an empty payload, not a failure: the source link's native Telegram preview is
+            // already in the chat, and adding a "tool failure" log line would be noise.
+            if (info.Entries is { Length: 0 })
+            {
+                _logger.LogInformation(
+                    "Skipping {Url}: post has no playable media (likely image-only or text-only)",
+                    url);
+                return Result<MediaPayload, ExtractionError>.Success(
+                    new MediaPayload(url, info.Title, info.Uploader, [], info.Description));
+            }
+
             var maxBytes = (long)_options.MaxFileSizeMb * 1024 * 1024;
 
             var predictedSize = info.Formats?
@@ -138,7 +152,7 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
                     "Skipping download of {Url}: predicted size {SizeMb}MB exceeds limit {LimitMb}MB",
                     url, predictedSize / (1024 * 1024), _options.MaxFileSizeMb);
                 return Result<MediaPayload, ExtractionError>.Success(
-                    new MediaPayload(url, info.Title, info.Uploader, []));
+                    new MediaPayload(url, info.Title, info.Uploader, [], info.Description));
             }
 
             // Prefer a pre-merged single-file format so we don't need ffmpeg to glue DASH
@@ -173,7 +187,7 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
                     filePath, fileInfo.Length / (1024 * 1024), _options.MaxFileSizeMb);
                 BestEffortDelete(filePath);
                 return Result<MediaPayload, ExtractionError>.Success(
-                    new MediaPayload(url, info.Title, info.Uploader, []));
+                    new MediaPayload(url, info.Title, info.Uploader, [], info.Description));
             }
 
             var item = new MediaItem(
@@ -184,7 +198,7 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
                 DurationSeconds: info.Duration is { } d ? (int)d : null);
 
             return Result<MediaPayload, ExtractionError>.Success(
-                new MediaPayload(url, info.Title, info.Uploader, [item]));
+                new MediaPayload(url, info.Title, info.Uploader, [item], info.Description));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

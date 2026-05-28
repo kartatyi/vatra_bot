@@ -117,21 +117,38 @@ public sealed class TelegramBotMessenger(
         }
     }
 
+    // Telegram caps captions on media messages at 1024 characters.
+    private const int MaxCaptionLength = 1024;
+
     private static string? BuildCaption(MediaPayload payload)
     {
-        var hasTitle = !string.IsNullOrWhiteSpace(payload.Title);
-        var hasAuthor = !string.IsNullOrWhiteSpace(payload.Author);
+        // Prefer the description (the actual post body — what the user wrote on IG, TikTok, etc.)
+        // over the title (which yt-dlp often synthesises as "Video by <uploader>" for short-form).
+        var primary = !string.IsNullOrWhiteSpace(payload.Description)
+            ? payload.Description.Trim()
+            : !string.IsNullOrWhiteSpace(payload.Title)
+                ? payload.Title.Trim()
+                : null;
 
-        if (!hasTitle && !hasAuthor)
+        var author = !string.IsNullOrWhiteSpace(payload.Author)
+            ? payload.Author.Trim()
+            : null;
+
+        var caption = (primary, author) switch
+        {
+            (string p, string a) => $"{p}\n\n— {a}",
+            (string p, null) => p,
+            (null, string a) => $"— {a}",
+            _ => null,
+        };
+
+        if (caption is null)
         {
             return null;
         }
 
-        if (hasTitle && hasAuthor)
-        {
-            return $"{payload.Title} — {payload.Author}";
-        }
-
-        return hasTitle ? payload.Title : $"by {payload.Author}";
+        return caption.Length > MaxCaptionLength
+            ? caption[..(MaxCaptionLength - 1)] + "…"
+            : caption;
     }
 }
