@@ -6,6 +6,7 @@ using Polly.Retry;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Types;
+using Telegram.Bot.Types.Enums;
 
 namespace LeBot.Infrastructure.Telegram;
 
@@ -89,6 +90,17 @@ public sealed class TelegramBotMessenger(
             text: body,
             replyParameters: new ReplyParameters { MessageId = replyToMessageId },
             cancellationToken: ct), cancellationToken);
+    }
+
+    public IAsyncDisposable IndicateBusy(long chatId, BusyKind kind)
+    {
+        var action = kind switch
+        {
+            BusyKind.UploadingPhoto => ChatAction.UploadPhoto,
+            BusyKind.Typing => ChatAction.Typing,
+            _ => ChatAction.UploadVideo,
+        };
+        return new TelegramBusyIndicator(bot, chatId, action, logger);
     }
 
     private async Task SendSingleAsync(

@@ -30,6 +30,36 @@ public class HandleIncomingMessageHandlerTests
         await _extractor.DidNotReceiveWithAnyArgs().ExtractAsync(default!, default);
         await _messenger.DidNotReceiveWithAnyArgs().ReplyWithMediaAsync(default, default, default!, default);
         await _messenger.DidNotReceiveWithAnyArgs().ReplyWithTextAsync(default, default, default!, default);
+        _messenger.DidNotReceiveWithAnyArgs().IndicateBusy(default, default);
+    }
+
+    [Fact]
+    public async Task HandleAsync_SupportedUrl_RaisesBusyIndicator()
+    {
+        var url = new Uri("https://example.com/x");
+        var item = new MediaItem("/tmp/x.mp4", MediaKind.Video, null, null, null);
+        var payload = new MediaPayload(url, null, null, [item]);
+
+        _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
+        _extractor.CanHandle(url).Returns(true);
+        _extractor.ExtractAsync(url, Arg.Any<CancellationToken>())
+            .Returns(Result<MediaPayload, ExtractionError>.Success(payload));
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        _messenger.Received(1).IndicateBusy(123L, BusyKind.UploadingVideo);
+    }
+
+    [Fact]
+    public async Task HandleAsync_UnsupportedUrl_DoesNotRaiseBusyIndicator()
+    {
+        var url = new Uri("https://unsupported.example.com/x");
+        _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
+        _extractor.CanHandle(url).Returns(false);
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        _messenger.DidNotReceiveWithAnyArgs().IndicateBusy(default, default);
     }
 
     [Fact]

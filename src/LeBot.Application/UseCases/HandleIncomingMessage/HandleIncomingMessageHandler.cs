@@ -40,6 +40,11 @@ public sealed class HandleIncomingMessageHandler(
             return;
         }
 
+        // Show "Bot is uploading a video..." in the chat header for the whole life of this
+        // method so the user has immediate feedback while extraction + upload run. The
+        // indicator is cancelled when ProcessUrlAsync returns (success, failure, or fallback).
+        await using var busy = messenger.IndicateBusy(message.ChatId, BusyKind.UploadingVideo);
+
         MediaPayload? textFallback = null;
 
         foreach (var extractor in candidates)
