@@ -166,6 +166,19 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
                     new MediaPayload(url, info.Title, info.Uploader, [], info.Description));
             }
 
+            // Some posts come back with rich metadata (title, description, uploader) but no
+            // downloadable formats at all — Instagram image carousels and text-only Threads
+            // posts shaped as single entries are the usual culprit. Surface the metadata as
+            // text-only rather than burning a download attempt that always 404s.
+            if (info.Formats is null or { Length: 0 })
+            {
+                _logger.LogInformation(
+                    "Skipping {Url}: yt-dlp returned no downloadable formats — surfacing text only",
+                    url);
+                return Result<MediaPayload, ExtractionError>.Success(
+                    new MediaPayload(url, info.Title, info.Uploader, [], info.Description));
+            }
+
             // Prefer a pre-merged single-file format so we don't need ffmpeg to glue DASH
             // video and audio streams (Instagram and some other platforms only expose DASH;
             // without this selector yt-dlp grabs both streams and then "succeeds" with no
