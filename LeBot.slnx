@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/LeBot.Application/LeBot.Application.csproj" />
+    <Project Path="src/LeBot.Domain/LeBot.Domain.csproj" />
+    <Project Path="src/LeBot.Host/LeBot.Host.csproj" />
+    <Project Path="src/LeBot.Infrastructure/LeBot.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/LeBot.Application.Tests/LeBot.Application.Tests.csproj" />
+    <Project Path="tests/LeBot.Domain.Tests/LeBot.Domain.Tests.csproj" />
+    <Project Path="tests/LeBot.Infrastructure.Tests/LeBot.Infrastructure.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,18 @@
+<Project>
+
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+
+    <!-- CA1031: catching general Exception is appropriate for Infrastructure wrappers around external tools. -->
+    <!-- CA1812: false positive for DI-registered internal types. -->
+    <!-- CA1515: aggressive; harms test access to internal types. -->
+    <!-- CA1303: localisation noise irrelevant for a personal bot. -->
+    <!-- CA1822: "make static" noise on instance methods that exist for testability/DI. -->
+    <NoWarn>$(NoWarn);CA1031;CA1812;CA1515;CA1303;CA1822</NoWarn>
+  </PropertyGroup>
+
+</Project>
