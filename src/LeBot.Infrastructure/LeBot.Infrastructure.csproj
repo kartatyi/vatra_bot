@@ -12,10 +12,8 @@
   <ItemGroup>
     <PackageReference Include="Telegram.Bot" />
     <PackageReference Include="YoutubeDLSharp" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
-    <PackageReference Include="Microsoft.Extensions.Http" />
-    <PackageReference Include="Polly" />
   </ItemGroup>
 
 </Project>
