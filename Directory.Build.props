@@ -12,7 +12,10 @@
     <!-- CA1515: aggressive; harms test access to internal types. -->
     <!-- CA1303: localisation noise irrelevant for a personal bot. -->
     <!-- CA1822: "make static" noise on instance methods that exist for testability/DI. -->
-    <NoWarn>$(NoWarn);CA1031;CA1812;CA1515;CA1303;CA1822</NoWarn>
+    <!-- CA1000: static factory methods on Result<T,E> are the whole point of the type. -->
+    <!-- CA1848: LoggerMessage source-gen is over-engineering for the volume of logging this bot does. -->
+    <!-- CA1873: log-message argument cost is negligible compared to network/yt-dlp I/O. -->
+    <NoWarn>$(NoWarn);CA1031;CA1812;CA1515;CA1303;CA1822;CA1000;CA1848;CA1873</NoWarn>
   </PropertyGroup>
 
 </Project>
