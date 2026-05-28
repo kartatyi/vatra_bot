@@ -10,9 +10,11 @@ A Telegram group bot that re-posts the actual video / photo content from TikTok,
 
 ## What it does
 
-- Detects media URLs in any group message — TikTok, Instagram Reels, YouTube Shorts, Threads, and the ~1800 sites supported by `yt-dlp`.
-- Downloads the underlying media and reposts it as a native Telegram message.
-- (Planned) Conversational layer with per-user dossiers, replies to mentions, and lightweight task running.
+- Watches every message in the group, picks out `http(s)` URLs, and reposts whatever media those URLs point at as a native Telegram reply.
+- Hybrid extraction chain: a custom Instagram embed scraper takes the first pass at `/p/...` posts (image carousels yt-dlp can't see), yt-dlp covers everything else (Reels, TikTok, YouTube Shorts, Threads, X, Reddit, Vimeo, Twitch, Facebook, and the rest of the ~1800 sites it supports).
+- Re-posts as the right Telegram primitive: single `SendVideo` / `SendPhoto`, or `SendMediaGroup` for multi-image carousels, with the post's body text as the caption.
+- Always replies with **something**. When a link is supported but media extraction fails, the bot falls back to the post's title/description as a text reply; when even that's empty, it acknowledges with "Couldn't extract media from this link."
+- Polly retries transient Telegram failures (429, 5xx) with exponential backoff + jitter; permanent failures (400, 403) fall through to a source-URL text reply.
 
 ## Why
 
@@ -20,15 +22,16 @@ In a group chat, every external link is a context switch — open the app, watch
 
 ## Roadmap
 
-- [ ] **Phase 1.** Link detection, media extraction, re-posting.
-  - [ ] Telegram update dispatcher with correlation IDs
-  - [ ] yt-dlp wrapper via `YoutubeDLSharp`
-  - [ ] Per-platform `IPlatformExtractor` strategy
-  - [ ] Re-post pipeline with size-aware fallback (file vs. URL)
-  - [ ] CI with format / build / test / coverage gates
+- [x] **Phase 1.** Link detection, media extraction, re-posting.
+  - [x] Telegram update dispatcher with correlation IDs in the log scope
+  - [x] yt-dlp wrapper via `YoutubeDLSharp`
+  - [x] `IPlatformExtractor` strategy + hybrid Instagram embed scraper as the first extractor in the chain
+  - [x] Re-post pipeline: single media, `SendMediaGroup` albums, text-only fallback, generic "couldn't extract" acknowledgement
+  - [x] Polly retry on transient Telegram errors
+  - [x] CI on GitHub Actions: format, build, test, coverage upload
 - [ ] **Phase 2.** Conversational layer.
   - [ ] Per-user dossier storage (EF Core + SQLite -> PostgreSQL)
-  - [ ] LLM-backed reply pipeline (provider TBD)
+  - [ ] LLM-backed reply pipeline (provider TBD — see `docs/decisions/0001-phase2-llm-provider.md`)
   - [ ] Mention / DM routing
   - [ ] Lightweight task vocabulary (reminders, quick lookups, group polls)
 
@@ -39,7 +42,7 @@ In a group chat, every external link is a context switch — open the app, watch
 - `Telegram.Bot`, `YoutubeDLSharp`, `Serilog`, `Polly`
 - xUnit + FluentAssertions + NSubstitute + Coverlet
 
-A high-level architecture diagram will land in [`docs/architecture.md`](docs/architecture.md) with the first feature.
+A baseline knowledge graph of the source tree is checked in under [`docs/graphs/`](docs/graphs/) — open `2026-05-28-src.html` in any browser to navigate the architecture. The graph confirms the three god-nodes (`InstagramEmbedExtractor`, `YtDlpPlatformExtractor`, `TelegramBotMessenger`) and the Clean-Architecture domain isolation.
 
 ## Quick Start
 
@@ -91,10 +94,12 @@ Post a TikTok / YouTube Shorts / Instagram Reels / Threads URL in the group. The
 
 ### Limits to keep in mind
 
-- **File upload via the Bot API** caps at ~50 MB for videos and ~10 MB for photos. Larger media falls back to a clean direct URL.
-- **Rate limits:** Telegram allows ~30 messages/sec globally and ~1/sec per chat. The bot retries with exponential backoff on `429 Too Many Requests`.
+- **File upload via the Bot API** caps at ~50 MB for videos and ~10 MB for photos. Larger media is dropped from the album and the source URL is sent as a fallback.
+- **Rate limits:** Telegram allows ~30 messages/sec globally and ~1/sec per chat. Polly retries `429` / `5xx` with exponential backoff and jitter before giving up.
 - **Group privacy must stay disabled.** Re-enabling it silently breaks link detection — the bot will keep running but never see plain-text messages.
 - **Token rotation:** if a token ever leaks, revoke it via BotFather: `/mybots` → pick the bot → **API Token** → **Revoke current token**. Old token dies instantly.
+- **Instagram image posts are best-effort.** Instagram closed off the public `/embed/captioned/` JSON during development; the embed scraper still tries first and produces a multi-photo album when IG hands data back, otherwise the bot falls through to a text reply built from the post's title and description (which yt-dlp gives us even when there's no video). See `docs/decisions/` or `memory` for the full background.
+- **YouTube extraction may degrade without a JS runtime.** yt-dlp warns about missing `deno` for newer YouTube paths. Install `deno` (or `node`) and place it on `PATH` if you start seeing "Some formats may be missing" on Shorts.
 
 ## Contributing
 
