@@ -16,28 +16,6 @@ namespace LeBot.Infrastructure.MediaExtraction.YtDlp;
 /// </summary>
 public sealed class YtDlpPlatformExtractor : IPlatformExtractor
 {
-    private static readonly HashSet<string> SupportedHosts = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "tiktok.com",
-        "vm.tiktok.com",
-        "vt.tiktok.com",
-        "m.tiktok.com",
-        "youtube.com",
-        "youtu.be",
-        "instagram.com",
-        "threads.net",
-        "threads.com",
-        "twitter.com",
-        "x.com",
-        "reddit.com",
-        "redd.it",
-        "facebook.com",
-        "fb.watch",
-        "vimeo.com",
-        "twitch.tv",
-        "clips.twitch.tv",
-    };
-
     private readonly YoutubeDL _ytdl;
     private readonly YtDlpOptions _options;
     private readonly ILogger<YtDlpPlatformExtractor> _logger;
@@ -98,13 +76,12 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
 
     public bool CanHandle(Uri url)
     {
-        var host = url.Host;
-        if (host.StartsWith("www.", StringComparison.OrdinalIgnoreCase))
-        {
-            host = host[4..];
-        }
-
-        return SupportedHosts.Contains(host);
+        // yt-dlp claims ~1800 sites — anything we'd plausibly want to repost. Rather than
+        // maintaining a curated whitelist that goes stale every time TikTok ships a new short
+        // domain, we claim every http(s) URL and let yt-dlp's own extractor matrix decide.
+        // Unsupported hosts come back as ExtractionError.UnsupportedPlatform and the handler
+        // skips them silently — no "Couldn't extract" message for random non-media URLs.
+        return url.Scheme == Uri.UriSchemeHttp || url.Scheme == Uri.UriSchemeHttps;
     }
 
     public async Task<Result<MediaPayload, ExtractionError>> ExtractAsync(
@@ -123,6 +100,14 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
             if (!metadata.Success || metadata.Data is null)
             {
                 var detail = JoinErrors(metadata.ErrorOutput);
+
+                if (LooksLikeUnsupportedUrl(detail))
+                {
+                    _logger.LogDebug("yt-dlp does not handle {Url} — leaving for other extractors / silent skip", url);
+                    return Result<MediaPayload, ExtractionError>.Failure(
+                        new ExtractionError.UnsupportedPlatform(url));
+                }
+
                 _logger.LogWarning("yt-dlp metadata fetch failed for {Url}: {Detail}", url, detail);
                 return Result<MediaPayload, ExtractionError>.Failure(
                     new ExtractionError.ContentUnavailable(url, detail));
@@ -263,8 +248,18 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
         // the title and description back and surface them as a text reply than swallow
         // them with a hard failure.
         opts.AddCustomOption("--ignore-no-formats-error", true);
+        // Strip emoji and other non-ASCII characters from output filenames. yt-dlp's
+        // captured-filename reporting (what YoutubeDLSharp parses into RunResult.Data)
+        // does its own normalisation that disagrees with what ends up on disk when the
+        // title contains emoji — TikTok in particular puts 📌 in titles and we'd then
+        // look for a sanitised name that doesn't exist. --restrict-filenames keeps both
+        // sides in lockstep with ASCII-only names.
+        opts.AddCustomOption("--restrict-filenames", true);
         return opts;
     }
+
+    private static bool LooksLikeUnsupportedUrl(string detail) =>
+        detail.Contains("Unsupported URL", StringComparison.OrdinalIgnoreCase);
 
     private async Task<Result<MediaPayload, ExtractionError>> DownloadPlaylistAsync(
         Uri url,

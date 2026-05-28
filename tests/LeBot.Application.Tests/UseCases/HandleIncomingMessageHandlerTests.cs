@@ -150,6 +150,24 @@ public class HandleIncomingMessageHandlerTests
     }
 
     [Fact]
+    public async Task HandleAsync_ExtractorReturnsUnsupportedPlatform_StaysSilent()
+    {
+        var url = new Uri("https://github.com/user/repo");
+        _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
+        _extractor.CanHandle(url).Returns(true);
+        _extractor.ExtractAsync(url, Arg.Any<CancellationToken>())
+            .Returns(Result<MediaPayload, ExtractionError>.Failure(new ExtractionError.UnsupportedPlatform(url)));
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        // UnsupportedPlatform is the "this isn't ours" signal — never produce a reply for it,
+        // even when CanHandle was optimistically true. Otherwise every random github / news URL
+        // gets a "Couldn't extract media" message and the chat fills with noise.
+        await _messenger.DidNotReceiveWithAnyArgs().ReplyWithMediaAsync(default, default, default!, default);
+        await _messenger.DidNotReceiveWithAnyArgs().ReplyWithTextAsync(default, default, default!, default);
+    }
+
+    [Fact]
     public async Task HandleAsync_ExtractorFails_SendsFallbackAcknowledgement()
     {
         var url = new Uri("https://example.com/x");

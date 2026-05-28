@@ -46,6 +46,7 @@ public sealed class HandleIncomingMessageHandler(
         await using var busy = messenger.IndicateBusy(message.ChatId, BusyKind.UploadingVideo);
 
         MediaPayload? textFallback = null;
+        var sawSubstantiveAttempt = false;
 
         foreach (var extractor in candidates)
         {
@@ -67,16 +68,26 @@ public sealed class HandleIncomingMessageHandler(
 
                 case Result<MediaPayload, ExtractionError>.Ok ok when HasReplyableText(ok.Value):
                     textFallback ??= ok.Value;
+                    sawSubstantiveAttempt = true;
+                    break;
+
+                case Result<MediaPayload, ExtractionError>.Err err when err.Error is ExtractionError.UnsupportedPlatform:
+                    // This extractor doesn't claim the URL; treat it as if CanHandle had returned
+                    // false. Silent skip — no ack, no warning.
+                    logger.LogDebug(
+                        "{Extractor} marked {Url} as unsupported", extractor.GetType().Name, url);
                     break;
 
                 case Result<MediaPayload, ExtractionError>.Err err:
                     logger.LogWarning(
                         "{Extractor} failed for {Url}: {Reason}",
                         extractor.GetType().Name, url, err.Error.Reason);
+                    sawSubstantiveAttempt = true;
                     break;
 
                 case Result<MediaPayload, ExtractionError>.Ok:
                     // Extractor returned nothing usable; try the next candidate.
+                    sawSubstantiveAttempt = true;
                     break;
             }
         }
@@ -94,8 +105,17 @@ public sealed class HandleIncomingMessageHandler(
             return;
         }
 
-        // Final acknowledgement so the user always sees a reply for any URL we recognised but
-        // couldn't extract — none of the extractors produced media or salvageable text.
+        if (!sawSubstantiveAttempt)
+        {
+            // Every extractor declined the URL — bare http link to a non-media site, basically.
+            // Stay silent so the chat isn't flooded with "Couldn't extract" for github / news /
+            // blog URLs that nobody wanted reposted in the first place.
+            logger.LogDebug("No extractor claimed {Url} — silent skip", url);
+            return;
+        }
+
+        // Final acknowledgement so the user always sees a reply for any URL an extractor tried
+        // to extract from and couldn't.
         var fallback = new MediaPayload(
             SourceUrl: url,
             Title: null,
