@@ -1,0 +1,10 @@
+<Project>
+
+  <Import Project="$(MSBuildThisFileDirectory)..\Directory.Build.props" />
+
+  <PropertyGroup>
+    <!-- Test methods follow Method_Scenario_Expectation by convention; CA1707 fires on every one. -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+  </PropertyGroup>
+
+</Project>
