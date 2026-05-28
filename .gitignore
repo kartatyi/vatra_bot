@@ -1,0 +1,113 @@
+##############################
+# .NET build outputs
+##############################
+bin/
+obj/
+artifacts/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+publish/
+*.dll
+*.exe
+*.pdb
+
+##############################
+# IDE / Editor
+##############################
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userprefs
+*.sln.docstates
+*.csproj.user
+*.swp
+*.swo
+
+##############################
+# Logs
+##############################
+logs/
+*.log
+
+##############################
+# Test results / coverage
+##############################
+TestResults/
+coverage/
+*.coverage
+*.coverage.cobertura.xml
+*.trx
+*.lcov
+
+##############################
+# Tools we fetch on first build
+##############################
+tools/yt-dlp/yt-dlp.exe
+tools/yt-dlp/ffmpeg.exe
+tools/yt-dlp/ffprobe.exe
+
+##############################
+# Secrets and local config
+##############################
+*.local.json
+appsettings.Local.json
+appsettings.Production.json
+.env
+.env.*
+!.env.example
+secrets/
+*.pfx
+*.snk
+
+##############################
+# Private / local notes
+##############################
+*.local.md
+*.local.txt
+notes.local.*
+docs/local/
+.private/
+
+##############################
+# NuGet
+##############################
+*.nupkg
+.nuget/
+packages/
+project.lock.json
+project.fragment.lock.json
+
+##############################
+# OS
+##############################
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+##############################
+# JetBrains Rider
+##############################
+*.sln.iml
+.idea.*/
+
+##############################
+# Visual Studio
+##############################
+*.opensdf
+*.sdf
+*.cachefile
+*.VC.db
+*.VC.opendb
+.history/
+
+##############################
+# Backups
+##############################
+*.bak
+*.orig
+*.rej

@@ -1,0 +1,44 @@
+# Normalise line endings on commit; checkout uses platform-native.
+* text=auto eol=lf
+
+# Source files
+*.cs       text eol=lf diff=csharp
+*.csproj   text eol=lf
+*.props    text eol=lf
+*.targets  text eol=lf
+*.json     text eol=lf
+*.md       text eol=lf
+*.yml      text eol=lf
+*.yaml     text eol=lf
+*.xml      text eol=lf
+*.config   text eol=lf
+*.editorconfig text eol=lf
+*.gitignore    text eol=lf
+*.gitattributes text eol=lf
+
+# Solution files are tooled for CRLF
+*.sln      text eol=crlf
+
+# PowerShell on Windows
+*.ps1      text eol=crlf
+*.psm1     text eol=crlf
+*.psd1     text eol=crlf
+
+# Binaries
+*.png      binary
+*.jpg      binary
+*.jpeg     binary
+*.gif      binary
+*.ico      binary
+*.webp     binary
+*.mp4      binary
+*.mov      binary
+*.pdf      binary
+*.zip      binary
+*.dll      binary
+*.exe      binary
+*.so       binary
+*.dylib    binary
+
+# Language reporting
+*.cs       linguist-language=C#
