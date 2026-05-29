@@ -1,3 +1,4 @@
+using LeBot.Application.Metrics;
 using LeBot.Application.Ports;
 using LeBot.Domain.Common;
 using LeBot.Domain.Media;
@@ -14,6 +15,7 @@ public sealed class HandleIncomingMessageHandler(
     IUrlExtractor urlExtractor,
     IEnumerable<IPlatformExtractor> extractors,
     ITelegramMessenger messenger,
+    RepostMetrics metrics,
     ILogger<HandleIncomingMessageHandler> logger)
 {
     public async Task HandleAsync(IncomingMessage message, CancellationToken cancellationToken)
@@ -61,6 +63,7 @@ public sealed class HandleIncomingMessageHandler(
                         message.MessageId,
                         ok.Value,
                         cancellationToken);
+                    metrics.RecordMediaRepost(extractor.GetType().Name);
                     logger.LogInformation(
                         "Reposted {Count} media item(s) from {Url} via {Extractor} into chat {ChatId}",
                         ok.Value.Items.Count, url, extractor.GetType().Name, message.ChatId);
@@ -82,6 +85,7 @@ public sealed class HandleIncomingMessageHandler(
                     logger.LogWarning(
                         "{Extractor} failed for {Url}: {Reason}",
                         extractor.GetType().Name, url, err.Error.Reason);
+                    metrics.RecordFailure(extractor.GetType().Name);
                     sawSubstantiveAttempt = true;
                     break;
 
@@ -99,6 +103,7 @@ public sealed class HandleIncomingMessageHandler(
                 message.MessageId,
                 textFallback,
                 cancellationToken);
+            metrics.RecordTextRepost();
             logger.LogInformation(
                 "Reposted text body from {Url} into chat {ChatId}",
                 url, message.ChatId);
@@ -110,6 +115,7 @@ public sealed class HandleIncomingMessageHandler(
             // Every extractor declined the URL — bare http link to a non-media site, basically.
             // Stay silent so the chat isn't flooded with "Couldn't extract" for github / news /
             // blog URLs that nobody wanted reposted in the first place.
+            metrics.RecordSilentSkip();
             logger.LogDebug("No extractor claimed {Url} — silent skip", url);
             return;
         }
@@ -127,6 +133,7 @@ public sealed class HandleIncomingMessageHandler(
             message.MessageId,
             fallback,
             cancellationToken);
+        metrics.RecordFallbackAck();
         logger.LogInformation(
             "Sent extraction-failed acknowledgement for {Url} into chat {ChatId}",
             url, message.ChatId);

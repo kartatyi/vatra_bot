@@ -1,5 +1,6 @@
 using LeBot.Application.Ports;
 using LeBot.Infrastructure.Configuration;
+using LeBot.Infrastructure.Maintenance;
 using LeBot.Infrastructure.MediaExtraction.InstagramEmbed;
 using LeBot.Infrastructure.MediaExtraction.ThreadsEmbed;
 using LeBot.Infrastructure.MediaExtraction.YtDlp;
@@ -51,6 +52,7 @@ public static class DependencyInjection
         services.AddSingleton<IPlatformExtractor, YtDlpPlatformExtractor>();
 
         services.AddHostedService<TelegramUpdateDispatcher>();
+        services.AddHostedService<DownloadsCleanupService>();
 
         return services;
     }

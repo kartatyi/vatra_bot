@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Text;
+using LeBot.Application.Metrics;
 using LeBot.Application.UseCases.HandleIncomingMessage;
 using LeBot.Infrastructure.Configuration;
 using Microsoft.Extensions.Hosting;
@@ -17,6 +20,7 @@ namespace LeBot.Infrastructure.Telegram;
 public sealed class TelegramUpdateDispatcher(
     ITelegramBotClient bot,
     HandleIncomingMessageHandler handler,
+    RepostMetrics metrics,
     IOptions<TelegramOptions> options,
     ILogger<TelegramUpdateDispatcher> logger)
     : BackgroundService
@@ -81,6 +85,14 @@ public sealed class TelegramUpdateDispatcher(
 
         try
         {
+            if (text.StartsWith('/'))
+            {
+                if (await TryHandleCommandAsync(message, text, cancellationToken))
+                {
+                    return;
+                }
+            }
+
             await handler.HandleAsync(
                 new IncomingMessage(
                     ChatId: message.Chat.Id,
@@ -94,4 +106,65 @@ public sealed class TelegramUpdateDispatcher(
             logger.LogError(ex, "Unhandled error processing update {UpdateId}", update.Id);
         }
     }
+
+    private async Task<bool> TryHandleCommandAsync(Message message, string text, CancellationToken cancellationToken)
+    {
+        var token = text.Split([' ', '\n'], 2, StringSplitOptions.RemoveEmptyEntries)[0];
+        var command = token.TrimStart('/');
+        var at = command.IndexOf('@', StringComparison.Ordinal);
+        if (at >= 0)
+        {
+            command = command[..at];
+        }
+
+        switch (command.ToLowerInvariant())
+        {
+            case "ping":
+            case "start":
+                await ReplyAsync(message, "🟢 OK", cancellationToken);
+                return true;
+            case "stats":
+                await ReplyAsync(message, FormatStats(), cancellationToken);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private Task<Message> ReplyAsync(Message original, string text, CancellationToken cancellationToken) =>
+        bot.SendMessage(
+            chatId: original.Chat.Id,
+            text: text,
+            replyParameters: new ReplyParameters { MessageId = original.MessageId },
+            cancellationToken: cancellationToken);
+
+    private string FormatStats()
+    {
+        var uptime = DateTimeOffset.UtcNow - metrics.StartedAt;
+        var sb = new StringBuilder();
+        sb.Append("Uptime: ");
+        sb.AppendLine(FormatUptime(uptime));
+        sb.Append("Media reposts: ").Append(metrics.MediaReposts.ToString(CultureInfo.InvariantCulture)).AppendLine();
+        sb.Append("Text reposts: ").Append(metrics.TextReposts.ToString(CultureInfo.InvariantCulture)).AppendLine();
+        sb.Append("Fallback acks: ").Append(metrics.FallbackAcks.ToString(CultureInfo.InvariantCulture)).AppendLine();
+        sb.Append("Failures: ").Append(metrics.Failures.ToString(CultureInfo.InvariantCulture)).AppendLine();
+        sb.Append("Silent skips: ").Append(metrics.SilentSkips.ToString(CultureInfo.InvariantCulture)).AppendLine();
+
+        if (metrics.ByExtractor.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("By extractor:");
+            foreach (var pair in metrics.ByExtractor.OrderByDescending(kv => kv.Value))
+            {
+                sb.Append("  ").Append(pair.Key).Append(": ").AppendLine(pair.Value.ToString(CultureInfo.InvariantCulture));
+            }
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static string FormatUptime(TimeSpan uptime) =>
+        uptime.TotalDays >= 1
+            ? $"{(int)uptime.TotalDays}d {uptime:hh\\:mm}"
+            : uptime.ToString("hh\\:mm\\:ss", CultureInfo.InvariantCulture);
 }

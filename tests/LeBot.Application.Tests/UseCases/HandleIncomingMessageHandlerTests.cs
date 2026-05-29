@@ -1,3 +1,4 @@
+using LeBot.Application.Metrics;
 using LeBot.Application.Ports;
 using LeBot.Application.UseCases.HandleIncomingMessage;
 using LeBot.Domain.Common;
@@ -12,10 +13,11 @@ public class HandleIncomingMessageHandlerTests
     private readonly IUrlExtractor _urlExtractor = Substitute.For<IUrlExtractor>();
     private readonly IPlatformExtractor _extractor = Substitute.For<IPlatformExtractor>();
     private readonly ITelegramMessenger _messenger = Substitute.For<ITelegramMessenger>();
+    private readonly RepostMetrics _metrics = new();
     private readonly ILogger<HandleIncomingMessageHandler> _logger = NullLogger<HandleIncomingMessageHandler>.Instance;
 
     private HandleIncomingMessageHandler CreateSut() =>
-        new(_urlExtractor, [_extractor], _messenger, _logger);
+        new(_urlExtractor, [_extractor], _messenger, _metrics, _logger);
 
     private static IncomingMessage Message(string text = "hi") =>
         new(ChatId: 123L, MessageId: 7, Text: text, SenderUsername: "user");
@@ -206,7 +208,7 @@ public class HandleIncomingMessageHandlerTests
 
         _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
 
-        var sut = new HandleIncomingMessageHandler(_urlExtractor, [first, second], _messenger, _logger);
+        var sut = new HandleIncomingMessageHandler(_urlExtractor, [first, second], _messenger, _metrics, _logger);
         await sut.HandleAsync(Message(), CancellationToken.None);
 
         await _messenger.Received(1).ReplyWithMediaAsync(123L, 7, goodPayload, Arg.Any<CancellationToken>());
@@ -232,7 +234,7 @@ public class HandleIncomingMessageHandlerTests
 
         _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
 
-        var sut = new HandleIncomingMessageHandler(_urlExtractor, [first, second], _messenger, _logger);
+        var sut = new HandleIncomingMessageHandler(_urlExtractor, [first, second], _messenger, _metrics, _logger);
         await sut.HandleAsync(Message(), CancellationToken.None);
 
         // Both ran (no media wins, so chain keeps going); first text wins as primary fallback.
