@@ -31,47 +31,14 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
 
         _ytdl = new YoutubeDL
         {
-            YoutubeDLPath = ResolveExecutablePath(_options.BinaryPath),
+            YoutubeDLPath = ExecutablePathResolver.Resolve(_options.BinaryPath),
             OutputFolder = _options.DownloadDirectory,
         };
 
         if (!string.IsNullOrEmpty(_options.FfmpegPath))
         {
-            _ytdl.FFmpegPath = ResolveExecutablePath(_options.FfmpegPath);
+            _ytdl.FFmpegPath = ExecutablePathResolver.Resolve(_options.FfmpegPath);
         }
-    }
-
-    /// <summary>
-    /// Resolves a relative tool path against the current working directory first
-    /// (this is what works when the bot is launched from the repo root) and then
-    /// by walking up from the assembly base directory until the file is found
-    /// (this is what works under <c>dotnet run --project src/LeBot.Host</c>,
-    /// where the CWD is set to the project folder several levels below the repo root).
-    /// Absolute paths are returned as-is.
-    /// </summary>
-    private static string ResolveExecutablePath(string configured)
-    {
-        if (string.IsNullOrEmpty(configured) || Path.IsPathRooted(configured))
-        {
-            return configured;
-        }
-
-        var cwdRelative = Path.GetFullPath(configured);
-        if (File.Exists(cwdRelative))
-        {
-            return cwdRelative;
-        }
-
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-        {
-            var candidate = Path.Combine(dir.FullName, configured);
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
-        }
-
-        return configured;
     }
 
     public bool CanHandle(Uri url)

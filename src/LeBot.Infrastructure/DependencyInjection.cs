@@ -53,6 +53,7 @@ public static class DependencyInjection
 
         services.AddHostedService<TelegramUpdateDispatcher>();
         services.AddHostedService<DownloadsCleanupService>();
+        services.AddHostedService<YtDlpUpdateService>();
 
         return services;
     }
