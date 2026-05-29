@@ -2,6 +2,20 @@
 
 This guide walks through moving the bot from a developer machine to a permanent host. Tested against **Windows 10 / 11** with .NET 10 runtime; the build is self-contained so the runtime does not have to be installed on the server itself.
 
+## TL;DR (Windows server, one command)
+
+```powershell
+# On dev machine
+pwsh tools/publish.ps1
+
+# Copy publish\LeBot.Host.exe to C:\LeBot\ on the server, then in admin cmd:
+C:\LeBot\LeBot.Host.exe --install
+```
+
+`--install` prompts for the bot token, downloads `yt-dlp.exe`, creates the runtime folders next to the binary, registers a Scheduled Task that runs at boot under `LocalSystem` with restart-on-failure, and starts it. To remove: `LeBot.Host.exe --uninstall`.
+
+The rest of this guide explains what each step does and the manual fallback for each piece.
+
 ## 1. Build the deployable
 
 On the developer machine:
@@ -21,11 +35,11 @@ publish/
 
 `PublishSingleFile=true` bundles every managed dependency into the .exe. Native libraries are extracted to a per-user temp folder on first run; `IncludeNativeLibrariesForSelfExtract=true` keeps that contract explicit.
 
-To target a Linux server use `pwsh tools/publish.ps1 -Runtime linux-x64`; the resulting binary needs `+x` permission.
+To target a Linux server use `pwsh tools/publish.ps1 -Runtime linux-x64`; the resulting binary needs `+x` permission. The `--install` command is Windows-only — on Linux configure systemd by hand.
 
-## 2. Lay out the server folder
+## 2. Layout on the server (handled by `--install`)
 
-Recommended layout on the server:
+The installer does all of this automatically. If you prefer to lay it out by hand, the target shape is:
 
 ```
 C:\LeBot\
@@ -74,9 +88,13 @@ Without this, Instagram image-carousel posts will fall through to the text-only 
 
 ## 5. Auto-start with Task Scheduler
 
-Task Scheduler is the lightest path on Windows 10 — no extra software, restarts on crash, starts at boot.
+`--install` registers a Scheduled Task called `LeBot` that runs at boot under `LocalSystem` (no logged-in user required) with restart-on-failure (999 attempts, 1-minute interval). Verify with:
 
-### One-shot setup (PowerShell as Administrator):
+```powershell
+Get-ScheduledTask -TaskName "LeBot" | Get-ScheduledTaskInfo
+```
+
+If you want to register it by hand (for example to use a non-`LocalSystem` account, or to put the task in a custom folder), here's the equivalent PowerShell:
 
 ```powershell
 $action = New-ScheduledTaskAction -Execute "C:\LeBot\LeBot.Host.exe" -WorkingDirectory "C:\LeBot"
