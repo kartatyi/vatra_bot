@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
+using System.Text.Json;
 
 namespace LeBot.Host.Installer;
 
@@ -55,8 +56,21 @@ internal static class Installer
             ?? throw new InvalidOperationException("Cannot determine installer working directory");
         Console.WriteLine($"Install location: {workDir}");
 
-        var token = Environment.GetEnvironmentVariable("Telegram__BotToken", EnvironmentVariableTarget.Machine);
-        if (string.IsNullOrWhiteSpace(token))
+        // We persist the token into appsettings.Local.json next to the binary instead of an
+        // environment variable. Task Scheduler's service captures its env block at boot and
+        // doesn't refresh when we write to HKLM — the bot launched as LocalSystem would never
+        // see a freshly-set machine-scope variable. A file on disk sidesteps the whole problem
+        // and Host.CreateApplicationBuilder already loads appsettings.Local.json by default
+        // (Program.cs wires it explicitly so the load order is predictable).
+        var configPath = Path.Combine(workDir, "appsettings.Local.json");
+        var existingToken = TryReadExistingToken(configPath);
+        string token;
+        if (!string.IsNullOrWhiteSpace(existingToken))
+        {
+            Console.WriteLine($"✓ Token already in {Path.GetFileName(configPath)} — reusing.");
+            token = existingToken;
+        }
+        else
         {
             Console.Write("Telegram bot token (from @BotFather): ");
             token = (Console.ReadLine() ?? string.Empty).Trim();
@@ -66,16 +80,9 @@ internal static class Installer
                 return 1;
             }
 
-            Environment.SetEnvironmentVariable("Telegram__BotToken", token, EnvironmentVariableTarget.Machine);
-            Console.WriteLine("✓ Token saved to Telegram__BotToken (machine scope).");
+            WriteTokenConfig(configPath, token);
+            Console.WriteLine($"✓ Token saved to {Path.GetFileName(configPath)}.");
         }
-        else
-        {
-            Console.WriteLine("✓ Telegram__BotToken already set at machine scope — reusing.");
-        }
-
-        Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", "Production", EnvironmentVariableTarget.Machine);
-        Console.WriteLine("✓ DOTNET_ENVIRONMENT=Production.");
 
         EnsureDirectory(Path.Combine(workDir, "tools", "yt-dlp"));
         EnsureDirectory(Path.Combine(workDir, "downloads"));
@@ -225,6 +232,70 @@ internal static class Installer
         {
             Directory.CreateDirectory(path);
         }
+    }
+
+    private static string? TryReadExistingToken(string configPath)
+    {
+        if (!File.Exists(configPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(configPath));
+            if (doc.RootElement.TryGetProperty("Telegram", out var telegram)
+                && telegram.TryGetProperty("BotToken", out var token)
+                && token.ValueKind == JsonValueKind.String)
+            {
+                return token.GetString();
+            }
+        }
+        catch
+        {
+            // Malformed file — fall through and rewrite from scratch.
+        }
+        return null;
+    }
+
+    private static void WriteTokenConfig(string configPath, string token)
+    {
+        // Preserve any other keys the operator may have added by hand (Serilog overrides,
+        // YtDlp tweaks, etc.) — only update Telegram.BotToken.
+        var existing = new Dictionary<string, JsonElement>();
+        if (File.Exists(configPath))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(File.ReadAllText(configPath));
+                foreach (var prop in doc.RootElement.EnumerateObject())
+                {
+                    existing[prop.Name] = prop.Value.Clone();
+                }
+            }
+            catch
+            {
+                existing.Clear();
+            }
+        }
+
+        using var stream = File.Create(configPath);
+        using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true });
+        writer.WriteStartObject();
+        foreach (var (key, value) in existing)
+        {
+            if (key.Equals("Telegram", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            writer.WritePropertyName(key);
+            value.WriteTo(writer);
+        }
+        writer.WritePropertyName("Telegram");
+        writer.WriteStartObject();
+        writer.WriteString("BotToken", token);
+        writer.WriteEndObject();
+        writer.WriteEndObject();
     }
 
     private static async Task DownloadYtDlp(string targetPath)
