@@ -16,9 +16,9 @@ This ADR sets the foundation for that layer — provider, persistence, and the r
 The constraints from Phase 1 carry over:
 
 - Clean Architecture stays. The LLM is an *adapter* behind a port in `Application`, not a leaky abstraction in `Domain`.
-- Code/docs in English; the bot's reply text is in Ukrainian (matching `le двіж`).
+- Code/docs in English; the bot's reply text is in Ukrainian (the group's working language).
 - No Co-Authored-By, no AI attribution in commits.
-- Deployment identity (`@LeKentBot`, the chat name) stays out of the repo.
+- Deployment identity (the bot handle and the chat name) stays out of the repo.
 
 ## Decisions
 
@@ -86,7 +86,7 @@ Recaps are how we keep context windows tractable. Instead of feeding the LLM 10,
 
 The bot doesn't volunteer replies just because the chat is lively. It speaks when:
 
-- It's mentioned (`@LeKentBot ...`) or replied to.
+- It's mentioned (`@<bot> …`) or replied to.
 - It's DM'd directly.
 - A scheduled task fires (reminder, daily recap on demand).
 
@@ -136,7 +136,7 @@ src/
 2. `TelegramUpdateDispatcher` captures every message into `ChatMessages` (silent build-up of corpus).
 3. `IChatLlm` + `AnthropicChatLlm` adapter with a happy-path replier using a fixed persona prompt. No dossier, no tools yet.
 4. `HandleMention` use case wires the above; mention/reply triggers a stub reply.
-5. Persona prompt iteration with the user in `le двіж` until the tone feels right.
+5. Persona prompt iteration with the user in the group until the tone feels right.
 6. Dossier writeback: LLM emits "extract facts" on each mention, stored as `ChatMembers.Notes` JSON.
 7. Daily recap background service. Recaps replace raw message context after N days.
 8. Tools: `set_reminder`, `create_poll`, `lookup_post`. Add one at a time.
