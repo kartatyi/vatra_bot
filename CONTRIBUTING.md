@@ -30,20 +30,32 @@ Thanks for the interest. This project takes code quality seriously — please re
 ## Code Style
 
 - File-scoped namespaces, nullable reference types on, `async` / `await` for every I/O path.
-- `dotnet format` is the source of truth — CI fails on a diff.
-- See [`CLAUDE.md`](CLAUDE.md) section 4 for the complete list.
+- Run `dotnet format` before committing; `.editorconfig` + analyzers are the source of truth.
+- See [`CLAUDE.md`](CLAUDE.md) → **Code rules** for what tooling can't catch.
 
 ## Testing
 
 - xUnit + FluentAssertions + NSubstitute.
 - Unit tests for `Domain` and `Application` are required for new logic.
-- Coverage thresholds are enforced in CI — see [`CLAUDE.md`](CLAUDE.md) section 5.
+- Coverage targets (Domain ≥ 90 %, Application ≥ 80 %, overall ≥ 70 %) — see [`CLAUDE.md`](CLAUDE.md) → **Tests & CI**. Targets, not yet CI-gated.
 
 ## Commits
 
 - Conventional Commits, imperative mood, subject <= 72 chars.
 - **No AI attribution.** No `Co-Authored-By: Claude`, no `Generated with ...`, nothing of the kind. Authorship belongs to the human pushing.
 - No `--no-verify`. No `--force` on shared branches.
+
+## Knowledge graphs (`/graphify`)
+
+We keep a small history of source-tree knowledge graphs under [`docs/graphs/`](docs/graphs/).
+
+Run `/graphify src/` (or a path) when a feature of ≥ 200 LOC across modules lands, before refactoring a non-trivial module, after a major architectural change, or as a monthly heartbeat — **not** on every commit. Then:
+
+1. Save the output as `docs/graphs/<YYYY-MM-DD>-<scope>.{html,json}`.
+2. Add a one-liner to `docs/graphs/CHANGELOG.md`.
+3. Commit with `docs(graphs): <summary>`.
+
+Graphs show *what is*; ADRs explain *why*; neither is a substitute for reading the code.
 
 ## Reporting Issues
 

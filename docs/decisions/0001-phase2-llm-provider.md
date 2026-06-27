@@ -141,7 +141,7 @@ src/
 7. Daily recap background service. Recaps replace raw message context after N days.
 8. Tools: `set_reminder`, `create_poll`, `lookup_post`. Add one at a time.
 
-Each step is its own PR off `main`. Now that Phase 1 is stable, the CLAUDE.md §7 feature-branch rule applies in full.
+Each step is its own PR off `main`. Now that Phase 1 is stable, the CLAUDE.md "Git — commits, branches, PRs" feature-branch rule applies in full.
 
 ---
 
