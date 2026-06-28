@@ -10,6 +10,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The Host's appsettings.json, linked in and embedded as the canonical default config layer so a
+         lone single-file exe still has working Serilog/YtDlp/Update defaults (see
+         EmbeddedAppConfiguration). One source file, linked — the embedded copy can never drift from the
+         on-disk one the Host also ships as Content. LogicalName pins the manifest name the loader reads. -->
+    <EmbeddedResource Include="..\LeBot.Host\appsettings.json" Link="appsettings.defaults.json" LogicalName="LeBot.Infrastructure.appsettings.defaults.json" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="LeBot.Infrastructure.Tests" />
     <!-- Lets NSubstitute (Castle DynamicProxy) mock internal ports such as IUpdateInstaller. -->
     <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />

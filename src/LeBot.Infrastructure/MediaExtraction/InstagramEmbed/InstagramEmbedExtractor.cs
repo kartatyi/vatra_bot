@@ -50,7 +50,7 @@ public sealed partial class InstagramEmbedExtractor : IPlatformExtractor
         _options = options.Value;
         _logger = logger;
 
-        Directory.CreateDirectory(_options.DownloadDirectory);
+        Directory.CreateDirectory(_options.ResolvedDownloadDirectory);
 
         _retryPipeline = new ResiliencePipelineBuilder<HttpResponseMessage>()
             .AddRetry(new RetryStrategyOptions<HttpResponseMessage>
@@ -300,7 +300,7 @@ public sealed partial class InstagramEmbedExtractor : IPlatformExtractor
             var extension = GuessExtensionFromContentType(response.Content.Headers.ContentType?.MediaType)
                 ?? GuessExtensionFromUrl(imageUrl)
                 ?? ".jpg";
-            var filePath = Path.Combine(_options.DownloadDirectory, $"ig_{Guid.NewGuid():N}{extension}");
+            var filePath = Path.Combine(_options.ResolvedDownloadDirectory, $"ig_{Guid.NewGuid():N}{extension}");
 
             await using (var fileStream = File.Create(filePath))
             await using (var httpStream = await response.Content.ReadAsStreamAsync(cancellationToken))

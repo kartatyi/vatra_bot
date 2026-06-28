@@ -1,6 +1,7 @@
 using LeBot.Application;
 using LeBot.Application.Ports;
 using LeBot.Application.UseCases.HandleIncomingMessage;
+using LeBot.Infrastructure.Configuration;
 using LeBot.Infrastructure.Maintenance;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -80,5 +81,20 @@ public class HostCompositionSmokeTests
 
         act.Should().Throw<InvalidOperationException>()
             .WithMessage("*Telegram:BotToken*user-secrets*");
+    }
+
+    [Fact]
+    public void EmbeddedDefaults_StandInForAMissingAppsettings_StillProvideSerilogSinks()
+    {
+        // Mirrors Program.cs: with no appsettings.json on disk, the embedded defaults are the base
+        // layer and must still furnish Serilog's Console + File sinks — otherwise a lone exe runs
+        // with no logging at all, the exact silent-failure trap this guards against.
+        var configuration = new ConfigurationBuilder()
+            .AddEmbeddedDefaults()
+            .Build();
+
+        var sinks = configuration.GetSection("Serilog:WriteTo").GetChildren().ToList();
+        sinks.Should().Contain(sink => sink["Name"] == "File", "logging must survive a missing appsettings.json");
+        sinks.Should().Contain(sink => sink["Name"] == "Console");
     }
 }
