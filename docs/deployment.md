@@ -175,6 +175,27 @@ Downtime is whatever Task Scheduler takes to stop+start — typically <10 second
 
 ## 9. Updating the bot
 
+The bot updates itself from GitHub Releases (see `docs/decisions/0002-self-update.md`) — you normally never touch the server.
+
+**Cut a release (dev machine).** Tag and push:
+
+```powershell
+git tag v1.1.0
+git push origin v1.1.0
+```
+
+`.github/workflows/release.yml` builds the single-file exe, computes its SHA256, and publishes a GitHub Release with `LeBot.Host.exe` + `LeBot.Host.exe.sha256`. Within `Update:CheckIntervalHours` (24 h) the running bot sees the newer tag, downloads and SHA256-verifies the asset, swaps the binary via two atomic renames, and relaunches through Task Scheduler — then DMs `Update:NotifyChatId` once the new version is up. Set `Update:Mode` to `NotifyOnly`, or `Update:Enabled` to `false`, in `appsettings.Local.json` to turn off auto-apply.
+
+**Roll back a bad release (server, admin prompt).** The updater keeps the previous binary as `LeBot.Host.exe.bak`:
+
+```powershell
+C:\LeBot\LeBot.Host.exe --rollback
+```
+
+This stops the task, restores the previous binary, and relaunches.
+
+**Manual update (fallback, if you don't use releases).**
+
 ```powershell
 # On dev machine:
 pwsh tools/publish.ps1
