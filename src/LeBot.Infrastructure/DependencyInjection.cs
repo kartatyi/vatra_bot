@@ -1,7 +1,7 @@
 using LeBot.Application.Ports;
 using LeBot.Infrastructure.Configuration;
 using LeBot.Infrastructure.Maintenance;
-using LeBot.Infrastructure.MediaExtraction.InstagramEmbed;
+using LeBot.Infrastructure.MediaExtraction.Instagram;
 using LeBot.Infrastructure.MediaExtraction.ThreadsEmbed;
 using LeBot.Infrastructure.MediaExtraction.YtDlp;
 using LeBot.Infrastructure.Releases;
@@ -47,12 +47,17 @@ public static class DependencyInjection
         services.AddSingleton<ITelegramMessenger, TelegramBotMessenger>();
         services.AddSingleton<IUrlExtractor, RegexUrlExtractor>();
 
-        // Order matters: extractors are tried in the order they're registered. The embed scrapers
-        // claim narrow URL families that yt-dlp can't (Instagram image carousels, Threads posts on
-        // the new .com domain) and run first so a successful embed pulls the chain out before yt-dlp
-        // wastes a process spawn on the same URL. YtDlpPlatformExtractor handles everything else and
-        // also acts as a fallback when embeds return nothing useful.
-        services.AddSingleton<IPlatformExtractor, InstagramEmbedExtractor>();
+        // Sources Instagram session cookies (via the same YtDlp:CookiesFromBrowser the bot already
+        // uses) so the private-API extractor below can authenticate.
+        services.AddSingleton<IBrowserCookieJarReader, YtDlpCookieJarReader>();
+        services.AddSingleton<IInstagramCookieProvider, YtDlpCookieProvider>();
+
+        // Order matters: extractors are tried in the order they're registered. The narrow extractors
+        // claim URL families that yt-dlp can't serve (Instagram photo posts / carousels, Threads
+        // posts on the new .com domain) and run first; a successful extraction pulls the chain out
+        // before yt-dlp wastes a process spawn on the same URL. When they return nothing useful the
+        // handler falls through to YtDlpPlatformExtractor, which handles everything else.
+        services.AddSingleton<IPlatformExtractor, InstagramApiExtractor>();
         services.AddSingleton<IPlatformExtractor, ThreadsEmbedExtractor>();
         services.AddSingleton<IPlatformExtractor, YtDlpPlatformExtractor>();
 
