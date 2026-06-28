@@ -50,7 +50,7 @@ internal sealed class InstagramApiExtractor : IPlatformExtractor
         _options = options.Value;
         _logger = logger;
 
-        Directory.CreateDirectory(_options.DownloadDirectory);
+        Directory.CreateDirectory(_options.ResolvedDownloadDirectory);
 
         _retryPipeline = new ResiliencePipelineBuilder<HttpResponseMessage>()
             .AddRetry(new RetryStrategyOptions<HttpResponseMessage>
@@ -348,7 +348,7 @@ internal sealed class InstagramApiExtractor : IPlatformExtractor
 
             var contentType = response.Content.Headers.ContentType?.MediaType;
             var extension = ExtensionFor(source.Kind, contentType, source.Url);
-            var filePath = Path.Combine(_options.DownloadDirectory, $"ig_{Guid.NewGuid():N}{extension}");
+            var filePath = Path.Combine(_options.ResolvedDownloadDirectory, $"ig_{Guid.NewGuid():N}{extension}");
 
             // Cap while streaming, not after: a chunked response carries no Content-Length, so the
             // predictive guard above can't fire and an oversized body would otherwise hit the disk

@@ -1,5 +1,6 @@
 using LeBot.Application.Ports;
 using LeBot.Infrastructure.Configuration;
+using LeBot.Infrastructure.Diagnostics;
 using LeBot.Infrastructure.Maintenance;
 using LeBot.Infrastructure.MediaExtraction.Instagram;
 using LeBot.Infrastructure.MediaExtraction.ThreadsEmbed;
@@ -29,6 +30,7 @@ public static class DependencyInjection
         services.Configure<UpdateOptions>(configuration.GetSection(UpdateOptions.SectionName));
 
         services.TryAddSingleton(TimeProvider.System);
+        services.AddSingleton<IHostAccountInfo, HostAccountInfo>();
 
         services.AddSingleton<ITelegramBotClient>(sp =>
         {
@@ -65,6 +67,10 @@ public static class DependencyInjection
         services.AddSingleton<IAppVersion, AssemblyAppVersion>();
         services.AddSingleton<IUpdateInstaller, UpdateInstaller>();
         services.AddSingleton<BotHealthSignal>();
+
+        // First hosted service: emit the effective-config summary (and the LocalSystem-cookies warning)
+        // before any polling noise, so the very top of the log answers "what is this process doing?".
+        services.AddHostedService<StartupConfigLogger>();
 
         services.AddHostedService<TelegramUpdateDispatcher>();
         services.AddHostedService<DownloadsCleanupService>();

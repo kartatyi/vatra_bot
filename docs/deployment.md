@@ -8,11 +8,20 @@ This guide walks through moving the bot from a developer machine to a permanent 
 # On dev machine
 pwsh tools/publish.ps1
 
-# Copy publish\LeBot.Host.exe to C:\LeBot\ on the server, then in admin cmd:
+# Copy publish\LeBot.Host.exe to C:\LeBot\ on the server, then in an admin prompt:
 C:\LeBot\LeBot.Host.exe --install
+C:\LeBot\LeBot.Host.exe --doctor    # ✓/✗ checklist — --install runs this for you at the end
 ```
 
-`--install` prompts for the bot token, downloads `yt-dlp.exe`, creates the runtime folders next to the binary, registers a Scheduled Task that runs at boot under `LocalSystem` with restart-on-failure, and starts it. To remove: `LeBot.Host.exe --uninstall`.
+`--install` prompts for the bot token, writes an editable `appsettings.json`, downloads `yt-dlp.exe`, creates the runtime folders next to the binary, registers a Scheduled Task that runs at boot under `LocalSystem` with restart-on-failure, starts it, and finishes with a `--doctor` health check. To remove: `LeBot.Host.exe --uninstall`.
+
+**The lone `.exe` is enough to boot with logging.** The default config (Serilog, yt-dlp, update) is *embedded* in the binary, so even if you copy only `LeBot.Host.exe` and forget the JSON, it still starts and writes logs — no more "copied one file, got zero logs anywhere". On-disk files next to the exe override the embedded defaults when you want to tune something:
+
+```text
+embedded appsettings.json   always present (baked in)   ← base defaults, can't be forgotten
+appsettings.json            optional, next to the exe   ← edit to override defaults
+appsettings.Local.json      optional, next to the exe   ← wins over both; holds the token
+```
 
 The rest of this guide explains what each step does and the manual fallback for each piece.
 
@@ -44,13 +53,13 @@ The installer does all of this automatically. If you prefer to lay it out by han
 ```
 C:\LeBot\
   LeBot.Host.exe
-  appsettings.json
+  appsettings.json      # optional — defaults are embedded; --install writes it so you can edit
   tools\
     yt-dlp\
       yt-dlp.exe
       ffmpeg.exe        # optional, only required if you want max-quality DASH merges
-  downloads\            # created on first run; bot cleans up files >1h old every 30 min
-  logs\                 # created on first run; daily rotation, last 7 kept
+  downloads\            # created on first run, beside the exe; files >1h old swept every 30 min
+  logs\                 # created on first run, beside the exe; daily rotation, last 7 kept
 ```
 
 Fetch yt-dlp manually or via `pwsh tools/fetch-tools.ps1` from a checkout of the repo.
@@ -84,7 +93,14 @@ If you want the bot to read Instagram image content gated behind login (rare; mo
 [Environment]::SetEnvironmentVariable("YtDlp__CookiesFromBrowser", "firefox", "User")
 ```
 
-Without this, Instagram image-carousel posts will fall through to the text-only reply (which is fine for the user's stated requirement).
+**Cookies and `LocalSystem` don't mix.** yt-dlp borrows cookies from a *user's* browser profile, and the `LocalSystem` account `--install` registers the task under has none — it can't see your Firefox login:
+
+```text
+bad   bot runs as LocalSystem + CookiesFromBrowser=firefox  → cookies unreadable, login-gated IG posts silently fail
+good  bot runs as the interactive user who logged into Firefox → cookies readable
+```
+
+So if you set `CookiesFromBrowser`, re-register the Scheduled Task to run as *that* user — the manual `Register-ScheduledTask` in §5 with your own `-UserId`, not `S-1-5-18`. You don't have to guess: `--doctor` warns when it sees cookies configured while the bot would run as `LocalSystem`, and the bot logs the same warning at startup. Without cookies, Instagram image-carousel posts fall through to the text-only reply (which is fine for the user's stated requirement).
 
 ## 5. Auto-start with Task Scheduler
 
@@ -140,14 +156,31 @@ The task restarts the bot once per minute for up to 999 attempts after any crash
 Get-Content C:\LeBot\logs\lebot-*.log -Tail 20 -Wait
 ```
 
-## 6. Healthcheck
+## 6. Verify it works
 
-The bot exposes two commands in any chat it's a member of:
+Run the built-in self-check (the installer runs it for you, but run it any time):
 
-- `/ping` — replies `🟢 OK`. Use this from your own DM with the bot to confirm it's alive.
-- `/stats` — replies with uptime, repost counts, and per-extractor tallies since the process started.
+```powershell
+C:\LeBot\LeBot.Host.exe --doctor
+```
 
-Schedule an external monitor (UptimeRobot, your own ping script) to DM `/ping` to the bot every N minutes — if it stops responding, you know to investigate.
+It prints a ✓/✗ checklist and exits non-zero if anything is broken, so a deploy script can gate on it:
+
+```text
+✓ Configuration: loaded (embedded defaults + on-disk overrides)
+✓ Bot token: present
+✓ Log directory: C:\LeBot\logs
+✓ Browser cookies: disabled (anonymous extraction)
+✗ yt-dlp: binary not found at tools\yt-dlp\yt-dlp.exe — re-run --install to download it
+✗ Telegram API: getMe rejected (code 401) — revoke and reset the token if this persists
+```
+
+- **Logs** land next to the exe at `C:\LeBot\logs\lebot-<date>.log` — an absolute path, so they never scatter to whatever directory you launched from. The bot prints `Logs: <path>` on startup, and `--install` prints it at the end.
+- **From Telegram**, the bot answers two commands in any chat it's a member of:
+  - `/ping` — replies `🟢 OK`. Use it from your DM with the bot to confirm it's alive.
+  - `/stats` — uptime, repost counts, and per-extractor tallies since the process started.
+
+Schedule an external monitor (UptimeRobot, your own ping script) to DM `/ping` every N minutes — if it stops answering, you know to investigate.
 
 ## 7. Graceful shutdown
 
