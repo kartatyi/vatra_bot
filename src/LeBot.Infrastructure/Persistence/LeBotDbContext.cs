@@ -1,3 +1,4 @@
+using System.Globalization;
 using LeBot.Application.Telemetry;
 using Microsoft.EntityFrameworkCore;
 
@@ -23,7 +24,20 @@ public sealed class LeBotDbContext(DbContextOptions<LeBotDbContext> options) : D
         repostEvent.Property<long>("Id").ValueGeneratedOnAdd();
         repostEvent.HasKey("Id");
 
-        repostEvent.Property(e => e.OccurredAt).IsRequired();
+        // SQLite has no native DateTimeOffset, and EF Core's *default* mapping can't translate comparisons
+        // or ORDER BY on it — yet every dashboard read filters by time window, which would leave the whole
+        // read side untranslatable. An explicit string converter fixes that: EF then emits plain TEXT
+        // comparisons, and this sortable-by-design format makes lexicographic order equal chronological
+        // order, so WHERE / ORDER BY / MIN / MAX all work. The format string deliberately mirrors EF's own
+        // default DateTimeOffset format (space separator, trimmed fraction, "+00:00"), so any rows a prior
+        // build wrote with the default mapping remain byte-identical and keep sorting correctly alongside
+        // new ones. UTC-normalising first guarantees the "+00:00" offset the ordering relies on.
+        const string occurredAtFormat = "yyyy-MM-dd HH:mm:ss.FFFFFFFzzz";
+        repostEvent.Property(e => e.OccurredAt)
+            .HasConversion(
+                value => value.ToUniversalTime().ToString(occurredAtFormat, CultureInfo.InvariantCulture),
+                stored => DateTimeOffset.Parse(stored, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind))
+            .IsRequired();
         repostEvent.Property(e => e.Host).IsRequired();
         repostEvent.Property(e => e.Url).IsRequired();
         // Stored as text, not an int, so a raw `SELECT` over the DB reads "Failure" not "2".
