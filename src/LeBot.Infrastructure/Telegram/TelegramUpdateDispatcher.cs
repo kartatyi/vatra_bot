@@ -158,7 +158,6 @@ public sealed class TelegramUpdateDispatcher(
         sb.AppendLine(FormatUptime(uptime));
         sb.Append("Media reposts: ").Append(metrics.MediaReposts.ToString(CultureInfo.InvariantCulture)).AppendLine();
         sb.Append("Text reposts: ").Append(metrics.TextReposts.ToString(CultureInfo.InvariantCulture)).AppendLine();
-        sb.Append("Fallback acks: ").Append(metrics.FallbackAcks.ToString(CultureInfo.InvariantCulture)).AppendLine();
         sb.Append("Failures: ").Append(metrics.Failures.ToString(CultureInfo.InvariantCulture)).AppendLine();
         sb.Append("Silent skips: ").Append(metrics.SilentSkips.ToString(CultureInfo.InvariantCulture)).AppendLine();
 

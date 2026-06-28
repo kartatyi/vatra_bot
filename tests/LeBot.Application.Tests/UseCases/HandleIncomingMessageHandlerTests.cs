@@ -97,7 +97,7 @@ public class HandleIncomingMessageHandlerTests
     }
 
     [Fact]
-    public async Task HandleAsync_EmptyPayload_SendsFallbackAcknowledgement()
+    public async Task HandleAsync_EmptyPayload_StaysSilent()
     {
         var url = new Uri("https://example.com/x");
         var payload = new MediaPayload(url, null, null, []);
@@ -109,11 +109,10 @@ public class HandleIncomingMessageHandlerTests
 
         await CreateSut().HandleAsync(Message(), CancellationToken.None);
 
+        // No media and no replyable text — the bot says nothing rather than posting a
+        // "couldn't extract" notice.
         await _messenger.DidNotReceiveWithAnyArgs().ReplyWithMediaAsync(default, default, default!, default);
-        await _messenger.Received(1).ReplyWithTextAsync(
-            123L, 7,
-            Arg.Is<MediaPayload>(p => p.SourceUrl == url && !string.IsNullOrEmpty(p.Description) && p.Items.Count == 0),
-            Arg.Any<CancellationToken>());
+        await _messenger.DidNotReceiveWithAnyArgs().ReplyWithTextAsync(default, default, default!, default);
     }
 
     [Fact]
@@ -170,7 +169,7 @@ public class HandleIncomingMessageHandlerTests
     }
 
     [Fact]
-    public async Task HandleAsync_ExtractorFails_SendsFallbackAcknowledgement()
+    public async Task HandleAsync_ExtractorFails_StaysSilent()
     {
         var url = new Uri("https://example.com/x");
         var error = new ExtractionError.ContentUnavailable(url, "gone");
@@ -182,11 +181,10 @@ public class HandleIncomingMessageHandlerTests
 
         await CreateSut().HandleAsync(Message(), CancellationToken.None);
 
+        // A hard extraction failure is counted but no longer acknowledged in-chat.
         await _messenger.DidNotReceiveWithAnyArgs().ReplyWithMediaAsync(default, default, default!, default);
-        await _messenger.Received(1).ReplyWithTextAsync(
-            123L, 7,
-            Arg.Is<MediaPayload>(p => p.SourceUrl == url && !string.IsNullOrEmpty(p.Description)),
-            Arg.Any<CancellationToken>());
+        await _messenger.DidNotReceiveWithAnyArgs().ReplyWithTextAsync(default, default, default!, default);
+        _metrics.Failures.Should().Be(1);
     }
 
     [Fact]
