@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-and-test:
-    name: Build and test
+    name: Build, test, and gate
     runs-on: ubuntu-latest
 
     steps:
@@ -22,6 +22,9 @@ jobs:
 
       - name: Restore
         run: dotnet restore
+
+      - name: Verify formatting
+        run: dotnet format --verify-no-changes
 
       - name: Build
         run: dotnet build --no-restore --configuration Release
@@ -42,9 +45,26 @@ jobs:
           name: test-results
           path: TestResults/**/*.trx
 
+      - name: Install ReportGenerator
+        run: |
+          dotnet tool install --global dotnet-reportgenerator-globaltool --version 5.5.10
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      - name: Coverage gate
+        run: |
+          reportgenerator \
+            -reports:"TestResults/**/coverage.cobertura.xml" \
+            -targetdir:"coverage-report" \
+            -reporttypes:"JsonSummary;MarkdownSummaryGithub" \
+            -assemblyfilters:"+LeBot.Domain;+LeBot.Application;+LeBot.Infrastructure;+LeBot.Host"
+          cat coverage-report/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
+          pwsh tools/check-coverage.ps1 -SummaryPath coverage-report/Summary.json
+
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage
-          path: TestResults/**/coverage.cobertura.xml
+          path: |
+            TestResults/**/coverage.cobertura.xml
+            coverage-report/**

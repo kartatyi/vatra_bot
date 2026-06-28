@@ -38,6 +38,7 @@ logs/
 ##############################
 TestResults/
 coverage/
+coverage-report/
 *.coverage
 *.coverage.cobertura.xml
 *.trx
