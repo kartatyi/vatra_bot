@@ -1,6 +1,7 @@
 using LeBot.Application;
 using LeBot.Application.Ports;
 using LeBot.Application.UseCases.HandleIncomingMessage;
+using LeBot.Infrastructure.Maintenance;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -25,6 +26,12 @@ public class HostCompositionSmokeTests
             ["YtDlp:BinaryPath"] = "yt-dlp",
             ["YtDlp:DownloadDirectory"] = Path.Combine(Path.GetTempPath(), "lebot-smoke-test"),
             ["YtDlp:MaxFileSizeMb"] = "50",
+            ["Update:Enabled"] = "true",
+            ["Update:Mode"] = "Apply",
+            ["Update:Repository"] = "kartatyi/vatra_bot",
+            ["Update:AssetName"] = "LeBot.Host.exe",
+            ["Update:CheckIntervalHours"] = "24",
+            ["Update:StartupDelayMinutes"] = "2",
         });
 
         builder.Services.AddApplicationServices();
@@ -43,6 +50,11 @@ public class HostCompositionSmokeTests
         host.Services.GetRequiredService<ITelegramMessenger>().Should().NotBeNull();
         host.Services.GetServices<IPlatformExtractor>().Should().HaveCountGreaterThanOrEqualTo(2,
             "the dispatcher relies on both the embed scraper and the yt-dlp extractor being registered");
+
+        // Self-updater ports — a registration drift here should fail loudly.
+        host.Services.GetRequiredService<IReleaseSource>().Should().NotBeNull();
+        host.Services.GetRequiredService<IAppVersion>().Should().NotBeNull();
+        host.Services.GetRequiredService<IUpdateInstaller>().Should().NotBeNull();
     }
 
     [Fact]

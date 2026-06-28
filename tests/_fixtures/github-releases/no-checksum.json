@@ -1,0 +1,12 @@
+{
+  "tag_name": "v1.4.0",
+  "name": "Release 1.4.0",
+  "body": "Asset present but no digest and no .sha256 sibling.",
+  "assets": [
+    {
+      "name": "LeBot.Host.exe",
+      "browser_download_url": "https://example.test/download/v1.4.0/LeBot.Host.exe",
+      "digest": null
+    }
+  ]
+}

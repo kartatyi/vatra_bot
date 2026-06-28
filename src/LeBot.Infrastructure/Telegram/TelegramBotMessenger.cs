@@ -92,6 +92,21 @@ public sealed class TelegramBotMessenger(
             cancellationToken: ct), cancellationToken);
     }
 
+    public async Task SendTextAsync(long chatId, string text, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return;
+        }
+
+        var body = text.Length > MaxTextLength ? text[..(MaxTextLength - 1)] + "…" : text;
+
+        await SendWithRetryAsync(ct => bot.SendMessage(
+            chatId: chatId,
+            text: body,
+            cancellationToken: ct), cancellationToken);
+    }
+
     public IAsyncDisposable IndicateBusy(long chatId, BusyKind kind)
     {
         var action = kind switch

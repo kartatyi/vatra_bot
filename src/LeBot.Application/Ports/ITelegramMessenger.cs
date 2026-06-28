@@ -23,6 +23,12 @@ public interface ITelegramMessenger
         CancellationToken cancellationToken);
 
     /// <summary>
+    /// Sends a standalone text message to a chat (not a reply to any message). Used for operator
+    /// notifications such as self-update progress. Over-long text is trimmed to Telegram's limit.
+    /// </summary>
+    Task SendTextAsync(long chatId, string text, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Shows the chat header status ("Bot is uploading a video...", etc.) and keeps it alive
     /// until the returned handle is disposed. The implementation re-sends the action periodically
     /// because Telegram dismisses each call after ~5 seconds.

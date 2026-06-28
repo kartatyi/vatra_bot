@@ -10,7 +10,10 @@
 param(
     [string]$OutputPath = "publish",
     [string]$Runtime    = "win-x64",
-    [string]$Configuration = "Release"
+    [string]$Configuration = "Release",
+    # Stamped into the assembly so the running bot knows its own version. The release
+    # workflow passes the git tag (e.g. 1.4.0); a manual run keeps the 0.0.0 dev default.
+    [string]$Version    = "0.0.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -32,6 +35,8 @@ dotnet publish $hostProject `
     -p:PublishSingleFile=true `
     -p:IncludeNativeLibrariesForSelfExtract=true `
     -p:DebugType=embedded `
+    -p:Version=$Version `
+    -p:InformationalVersion=$Version `
     -o $absoluteOutput
 
 if ($LASTEXITCODE -ne 0) {

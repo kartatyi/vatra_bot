@@ -4,6 +4,7 @@ using LeBot.Infrastructure.Maintenance;
 using LeBot.Infrastructure.MediaExtraction.InstagramEmbed;
 using LeBot.Infrastructure.MediaExtraction.ThreadsEmbed;
 using LeBot.Infrastructure.MediaExtraction.YtDlp;
+using LeBot.Infrastructure.Releases;
 using LeBot.Infrastructure.Telegram;
 using LeBot.Infrastructure.Text;
 using Microsoft.Extensions.Configuration;
@@ -25,6 +26,7 @@ public static class DependencyInjection
     {
         services.Configure<TelegramOptions>(configuration.GetSection(TelegramOptions.SectionName));
         services.Configure<YtDlpOptions>(configuration.GetSection(YtDlpOptions.SectionName));
+        services.Configure<UpdateOptions>(configuration.GetSection(UpdateOptions.SectionName));
 
         services.TryAddSingleton(TimeProvider.System);
 
@@ -54,9 +56,14 @@ public static class DependencyInjection
         services.AddSingleton<IPlatformExtractor, ThreadsEmbedExtractor>();
         services.AddSingleton<IPlatformExtractor, YtDlpPlatformExtractor>();
 
+        services.AddSingleton<IReleaseSource, GitHubReleaseSource>();
+        services.AddSingleton<IAppVersion, AssemblyAppVersion>();
+        services.AddSingleton<IUpdateInstaller, UpdateInstaller>();
+
         services.AddHostedService<TelegramUpdateDispatcher>();
         services.AddHostedService<DownloadsCleanupService>();
         services.AddHostedService<YtDlpUpdateService>();
+        services.AddHostedService<SelfUpdateService>();
 
         return services;
     }
