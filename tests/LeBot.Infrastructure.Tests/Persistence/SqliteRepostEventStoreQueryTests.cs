@@ -169,6 +169,7 @@ public sealed class SqliteRepostEventStoreQueryTests : IDisposable
         top.Select(h => h.Host).Should().ContainInOrder("tiktok.com", "x.com");
         top.Should().HaveCount(2);
         top[0].Total.Should().Be(3);
+        top[0].Successes.Should().Be(3); // all three tiktok events are media reposts
     }
 
     [Fact]
@@ -239,6 +240,48 @@ public sealed class SqliteRepostEventStoreQueryTests : IDisposable
         latency.Should().Be(LatencySummary.Empty);
     }
 
+    [Fact]
+    public async Task GetDailyOutcomesAsync_BucketsByUtcDay_OldestFirst()
+    {
+        await SeedAsync(
+            Event(RepostOutcome.MediaRepost, occurredAt: BaseInstant),
+            Event(RepostOutcome.MediaRepost, occurredAt: BaseInstant.AddHours(2)),
+            Event(RepostOutcome.Failure, occurredAt: BaseInstant.AddHours(4)),
+            Event(RepostOutcome.TextFallback, occurredAt: BaseInstant.AddDays(1)),
+            Event(RepostOutcome.Failure, occurredAt: BaseInstant.AddDays(1).AddHours(1)));
+
+        var days = await _sut.GetDailyOutcomesAsync(DateTimeOffset.MinValue, CancellationToken.None);
+
+        days.Should().HaveCount(2);
+        days[0].Date.Should().Be(new DateOnly(2026, 6, 28));
+        days[0].Total.Should().Be(3);
+        days[0].Successes.Should().Be(2);
+        days[0].Failures.Should().Be(1);
+        days[1].Date.Should().Be(new DateOnly(2026, 6, 29));
+        days[1].Successes.Should().Be(1);
+        days[1].Failures.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task GetVersionStatsAsync_TalliesPerVersion_InReleaseOrder()
+    {
+        await SeedAsync(
+            Event(RepostOutcome.MediaRepost, occurredAt: BaseInstant, version: "1.0.0"),
+            Event(RepostOutcome.MediaRepost, occurredAt: BaseInstant.AddHours(1), version: "1.0.0"),
+            Event(RepostOutcome.MediaRepost, occurredAt: BaseInstant.AddHours(2), version: "1.0.0"),
+            Event(RepostOutcome.MediaRepost, occurredAt: BaseInstant.AddDays(1), version: "1.1.0"),
+            Event(RepostOutcome.Failure, occurredAt: BaseInstant.AddDays(1).AddHours(1), version: "1.1.0"),
+            Event(RepostOutcome.Failure, occurredAt: BaseInstant.AddDays(1).AddHours(2), version: "1.1.0"));
+
+        var versions = await _sut.GetVersionStatsAsync(DateTimeOffset.MinValue, CancellationToken.None);
+
+        versions.Select(v => v.BotVersion).Should().ContainInOrder("1.0.0", "1.1.0"); // release order
+        versions[0].SuccessRate.Should().Be(1.0);
+        versions[1].Total.Should().Be(3);
+        versions[1].Failures.Should().Be(2);
+        versions[1].SuccessRate.Should().BeApproximately(1.0 / 3, 1e-9);
+    }
+
     private async Task SeedAsync(params RepostEvent[] events)
     {
         await using var db = new LeBotDbContext(_options);
@@ -255,7 +298,8 @@ public sealed class SqliteRepostEventStoreQueryTests : IDisposable
         string chatHash = "chat-a",
         string? errorVariant = null,
         string? errorReason = null,
-        string? url = null) =>
+        string? url = null,
+        string version = "1.0.0") =>
         new(
             OccurredAt: occurredAt ?? BaseInstant,
             Host: host,
@@ -267,7 +311,7 @@ public sealed class SqliteRepostEventStoreQueryTests : IDisposable
             MediaCount: outcome == RepostOutcome.MediaRepost ? 1 : 0,
             MediaBytes: outcome == RepostOutcome.MediaRepost ? 1024 : null,
             ElapsedMs: elapsedMs,
-            BotVersion: "1.0.0",
+            BotVersion: version,
             ChatHash: chatHash);
 
     public void Dispose()

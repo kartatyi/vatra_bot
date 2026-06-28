@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/LeBot.Application/LeBot.Application.csproj" />
+    <Project Path="src/LeBot.Dashboard/LeBot.Dashboard.csproj" />
     <Project Path="src/LeBot.Domain/LeBot.Domain.csproj" />
     <Project Path="src/LeBot.Host/LeBot.Host.csproj" />
     <Project Path="src/LeBot.Infrastructure/LeBot.Infrastructure.csproj" />

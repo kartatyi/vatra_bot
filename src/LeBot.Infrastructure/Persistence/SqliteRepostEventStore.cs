@@ -150,6 +150,53 @@ internal sealed class SqliteRepostEventStore(
         return new LatencySummary(count, average, p95);
     }
 
+    public async Task<IReadOnlyList<DailyOutcomeCount>> GetDailyOutcomesAsync(DateTimeOffset since, CancellationToken cancellationToken)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // OccurredAt is stored as a string (the value converter), so SQLite can't date-truncate it for a
+        // GROUP BY day. Pull just the two columns we need over the window and bucket in memory — the row
+        // count over any sensible dashboard window is small.
+        var rows = await db.RepostEvents.AsNoTracking()
+            .Where(e => e.OccurredAt >= since)
+            .Select(e => new { e.OccurredAt, e.Outcome })
+            .ToListAsync(cancellationToken);
+
+        return rows
+            .GroupBy(r => DateOnly.FromDateTime(r.OccurredAt.UtcDateTime))
+            .Select(g => new DailyOutcomeCount(
+                g.Key,
+                g.Count(),
+                g.Count(r => r.Outcome is RepostOutcome.MediaRepost or RepostOutcome.TextFallback),
+                g.Count(r => r.Outcome == RepostOutcome.Failure)))
+            .OrderBy(d => d.Date)
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<VersionStat>> GetVersionStatsAsync(DateTimeOffset since, CancellationToken cancellationToken)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var rows = await db.RepostEvents.AsNoTracking()
+            .Where(e => e.OccurredAt >= since)
+            .GroupBy(e => e.BotVersion)
+            .Select(g => new
+            {
+                Version = g.Key,
+                FirstSeen = g.Min(e => e.OccurredAt),
+                Total = g.Count(),
+                Successes = g.Sum(e => e.Outcome == RepostOutcome.MediaRepost || e.Outcome == RepostOutcome.TextFallback ? 1 : 0),
+                Failures = g.Sum(e => e.Outcome == RepostOutcome.Failure ? 1 : 0),
+            })
+            .ToListAsync(cancellationToken);
+
+        // Order by first appearance so the list reads in release order — the shape that makes a
+        // success-rate drop between consecutive builds legible as a regression.
+        return rows
+            .OrderBy(r => r.FirstSeen)
+            .Select(r => new VersionStat(r.Version, r.Total, r.Successes, r.Failures))
+            .ToList();
+    }
+
     /// <summary>
     /// One GROUP BY host over the window, materialised into <see cref="HostStat"/>s. Host cardinality on a
     /// personal bot is tiny (a handful of platforms), so the two "top hosts" reads sort and cap in memory
@@ -164,10 +211,11 @@ internal sealed class SqliteRepostEventStore(
             {
                 Host = g.Key,
                 Total = g.Count(),
+                Successes = g.Sum(e => e.Outcome == RepostOutcome.MediaRepost || e.Outcome == RepostOutcome.TextFallback ? 1 : 0),
                 Failures = g.Sum(e => e.Outcome == RepostOutcome.Failure ? 1 : 0),
             })
             .ToListAsync(cancellationToken);
 
-        return rows.Select(r => new HostStat(r.Host, r.Total, r.Failures)).ToList();
+        return rows.Select(r => new HostStat(r.Host, r.Total, r.Successes, r.Failures)).ToList();
     }
 }

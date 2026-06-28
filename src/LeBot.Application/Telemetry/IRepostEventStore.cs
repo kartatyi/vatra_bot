@@ -55,4 +55,16 @@ public interface IRepostEventStore
     /// the window has no events.
     /// </summary>
     Task<LatencySummary> GetLatencyAsync(DateTimeOffset since, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Per-UTC-day volume and success/failure split over the window, oldest day first — the HTML
+    /// dashboard's "outcomes over time" chart.
+    /// </summary>
+    Task<IReadOnlyList<DailyOutcomeCount>> GetDailyOutcomesAsync(DateTimeOffset since, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Per-build success/failure tallies over the window, ordered by when each build first appeared
+    /// (release order) — the dashboard's "regressions by version" view.
+    /// </summary>
+    Task<IReadOnlyList<VersionStat>> GetVersionStatsAsync(DateTimeOffset since, CancellationToken cancellationToken);
 }
