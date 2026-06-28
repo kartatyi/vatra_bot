@@ -10,16 +10,19 @@ namespace LeBot.Infrastructure.Maintenance;
 
 /// <summary>
 /// Keeps the bot binary current from GitHub Releases (ADR&#160;0002). Mirrors
-/// <see cref="YtDlpUpdateService"/>'s startup-delay-then-loop shape. On startup it promotes a
-/// just-applied update (deletes the <c>.bak</c>, DMs the operator); each sweep it compares its own
-/// version to the latest release and either notifies or downloads, verifies, swaps, and stops so the
-/// relaunch helper can bring the new binary up under Task Scheduler.
+/// <see cref="YtDlpUpdateService"/>'s startup-delay-then-loop shape. On startup it runs the health gate
+/// over any just-applied update — waiting until the bot actually confirms it is serving before it
+/// either promotes (deletes the <c>.bak</c>, DMs the operator) or, if the new build never starts
+/// serving, rolls back to the previous binary. Each sweep it then compares its own version to the
+/// latest release and either notifies or downloads, verifies, swaps, and stops so the relaunch helper
+/// can bring the new binary up under Task Scheduler.
 /// </summary>
 internal sealed class SelfUpdateService(
     IReleaseSource releaseSource,
     IUpdateInstaller installer,
     IAppVersion appVersion,
     ITelegramMessenger messenger,
+    BotHealthSignal health,
     IHostApplicationLifetime lifetime,
     IOptions<UpdateOptions> options,
     ILogger<SelfUpdateService> logger)
@@ -41,7 +44,10 @@ internal sealed class SelfUpdateService(
             return;
         }
 
-        await PromoteIfJustUpdatedAsync(stoppingToken);
+        if (!await RunHealthGateAsync(stoppingToken))
+        {
+            return;
+        }
 
         try
         {
@@ -150,37 +156,127 @@ internal sealed class SelfUpdateService(
         return UpdateAction.Apply;
     }
 
-    private async Task PromoteIfJustUpdatedAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Decides the fate of a just-applied update. Returns <c>true</c> if the service should carry on to
+    /// its regular release-check loop, or <c>false</c> if a rollback was started and the host is stopping.
+    /// </summary>
+    private async Task<bool> RunHealthGateAsync(CancellationToken stoppingToken)
     {
         string markerPath;
-        string backupPath;
         try
         {
             markerPath = UpdatePaths.MarkerPath;
-            backupPath = UpdatePaths.BackupPath;
         }
         catch (InvalidOperationException ex)
         {
-            logger.LogWarning(ex, "Could not resolve update paths for startup promotion");
-            return;
+            logger.LogWarning(ex, "Could not resolve update paths for the health gate");
+            return true;
         }
 
         if (!File.Exists(markerPath))
         {
-            return;
+            return true;
         }
 
-        var markerVersion = await ReadMarkerVersionAsync(markerPath, cancellationToken);
-        if (markerVersion is null || markerVersion != appVersion.Current)
+        var current = appVersion.Current;
+        var pendingVersion = await ReadMarkerVersionAsync(markerPath, stoppingToken);
+        if (pendingVersion is null || pendingVersion != current)
         {
+            // Either an unparseable marker, or we are running an older binary than the marker names
+            // (we already rolled back). Clear the stale state so a future update starts from clean.
+            if (pendingVersion is not null)
+            {
+                logger.LogDebug(
+                    "Update marker names v{Pending} but we are v{Current}; clearing stale state",
+                    pendingVersion, current);
+            }
+
+            ClearProbationState();
+            return true;
+        }
+
+        var served = await AwaitServingAsync(stoppingToken);
+        if (served is null)
+        {
+            return true; // shutting down before we could decide
+        }
+
+        var decision = UpdateWatchdog.Evaluate(
+            pendingMatchesCurrent: true,
+            isHealthy: served.Value,
+            healthStampPresent: false,
+            healthDeadlinePassed: !served.Value,
+            backupAvailable: File.Exists(UpdatePaths.BackupPath));
+
+        switch (decision)
+        {
+            case WatchdogDecision.Promote:
+                await PromoteAsync(current, stoppingToken);
+                return true;
+
+            case WatchdogDecision.RollBack:
+                await RollBackAsync(current, stoppingToken);
+                return false;
+
+            default:
+                logger.LogCritical(
+                    "v{Version} has not confirmed it is serving within {Minutes} min and there is no .bak to roll back to",
+                    current, _options.HealthGateTimeoutMinutes);
+                await NotifyAsync(
+                    $"v{current} has not confirmed it is serving, and there is no previous binary to roll back to.",
+                    stoppingToken);
+                return true;
+        }
+    }
+
+    /// <summary>Returns <c>true</c> if the bot confirmed it is serving, <c>false</c> on timeout, <c>null</c> on shutdown.</summary>
+    private async Task<bool?> AwaitServingAsync(CancellationToken stoppingToken)
+    {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        timeoutCts.CancelAfter(TimeSpan.FromMinutes(_options.HealthGateTimeoutMinutes));
+
+        try
+        {
+            await health.WaitForServingAsync(timeoutCts.Token);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return stoppingToken.IsCancellationRequested ? null : false;
+        }
+    }
+
+    private async Task PromoteAsync(ReleaseVersion current, CancellationToken cancellationToken)
+    {
+        // Stamp first: if the process dies mid-promotion (before the .bak is gone), the next boot
+        // sees the stamp and treats the build as proven rather than rolling a healthy binary back.
+        TryWriteHealthStamp(current);
+        await DeleteWithRetryAsync(UpdatePaths.BackupPath, cancellationToken);
+        ClearProbationState();
+
+        logger.LogInformation("Promoted update to v{Version}", current);
+        await NotifyAsync($"Updated to v{current}.", cancellationToken);
+    }
+
+    private async Task RollBackAsync(ReleaseVersion failed, CancellationToken cancellationToken)
+    {
+        logger.LogCritical(
+            "v{Version} did not confirm it is serving within {Minutes} min; rolling back to the previous binary",
+            failed, _options.HealthGateTimeoutMinutes);
+
+        try
+        {
+            installer.RestoreBackupAndLaunchHelper();
+        }
+        catch (IOException ex)
+        {
+            logger.LogError(ex, "In-process rollback could not restore the previous binary");
+            await NotifyAsync($"v{failed} failed its health check and the rollback failed too — manual recovery needed.", cancellationToken);
             return;
         }
 
-        await DeleteWithRetryAsync(backupPath, cancellationToken);
-        TryDelete(markerPath);
-
-        logger.LogInformation("Promoted update to v{Version}", appVersion.Current);
-        await NotifyAsync($"Updated to v{appVersion.Current}.", cancellationToken);
+        await NotifyAsync($"v{failed} failed its health check — rolled back to the previous version.", cancellationToken);
+        lifetime.StopApplication();
     }
 
     private async Task<ReleaseVersion?> ReadMarkerVersionAsync(string markerPath, CancellationToken cancellationToken)
@@ -195,6 +291,29 @@ internal sealed class SelfUpdateService(
             logger.LogWarning(ex, "Could not read update marker {Path}", markerPath);
             return null;
         }
+    }
+
+    private void TryWriteHealthStamp(ReleaseVersion version)
+    {
+        try
+        {
+            File.WriteAllText(UpdatePaths.HealthStampPath, version.ToString());
+        }
+        catch (IOException ex)
+        {
+            logger.LogDebug(ex, "Could not write health stamp");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            logger.LogDebug(ex, "Could not write health stamp");
+        }
+    }
+
+    private void ClearProbationState()
+    {
+        TryDelete(UpdatePaths.MarkerPath);
+        TryDelete(UpdatePaths.HealthStampPath);
+        TryDelete(UpdatePaths.BootAttemptsPath);
     }
 
     private async Task DeleteWithRetryAsync(string path, CancellationToken cancellationToken)

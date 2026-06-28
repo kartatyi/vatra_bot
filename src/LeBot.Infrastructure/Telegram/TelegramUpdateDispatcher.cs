@@ -3,6 +3,7 @@ using System.Text;
 using LeBot.Application.Metrics;
 using LeBot.Application.UseCases.HandleIncomingMessage;
 using LeBot.Infrastructure.Configuration;
+using LeBot.Infrastructure.Maintenance;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -21,6 +22,7 @@ public sealed class TelegramUpdateDispatcher(
     ITelegramBotClient bot,
     HandleIncomingMessageHandler handler,
     RepostMetrics metrics,
+    BotHealthSignal health,
     IOptions<TelegramOptions> options,
     TimeProvider timeProvider,
     ILogger<TelegramUpdateDispatcher> logger)
@@ -35,6 +37,7 @@ public sealed class TelegramUpdateDispatcher(
         logger.LogInformation("Bot @{Username} (id {Id}) is online", me.Username, me.Id);
 
         var offset = 0;
+        var announcedServing = false;
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -46,6 +49,14 @@ public sealed class TelegramUpdateDispatcher(
                     timeout: _options.PollingTimeoutSeconds,
                     allowedUpdates: [UpdateType.Message],
                     cancellationToken: stoppingToken);
+
+                if (!announcedServing)
+                {
+                    // getMe succeeded and the first poll returned — the bot is genuinely serving, not
+                    // just launched. The self-updater waits on this before promoting a fresh build.
+                    health.MarkServing();
+                    announcedServing = true;
+                }
 
                 foreach (var update in updates)
                 {

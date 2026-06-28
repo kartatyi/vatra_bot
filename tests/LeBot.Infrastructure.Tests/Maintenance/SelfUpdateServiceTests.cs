@@ -17,6 +17,7 @@ public class SelfUpdateServiceTests
     private readonly IUpdateInstaller _installer = Substitute.For<IUpdateInstaller>();
     private readonly IAppVersion _appVersion = Substitute.For<IAppVersion>();
     private readonly ITelegramMessenger _messenger = Substitute.For<ITelegramMessenger>();
+    private readonly BotHealthSignal _health = new();
     private readonly FakeLifetime _lifetime = new();
 
     public SelfUpdateServiceTests()
@@ -122,6 +123,7 @@ public class SelfUpdateServiceTests
             _installer,
             _appVersion,
             _messenger,
+            _health,
             _lifetime,
             options,
             NullLogger<SelfUpdateService>.Instance);

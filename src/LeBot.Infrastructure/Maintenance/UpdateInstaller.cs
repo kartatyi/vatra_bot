@@ -89,9 +89,44 @@ internal sealed class UpdateInstaller(ILogger<UpdateInstaller> logger) : IUpdate
         File.Move(stagedPath, currentExe);
         File.WriteAllText(UpdatePaths.MarkerPath, newVersion.ToString());
 
+        // The new version is on probation until it proves it can serve — start that count fresh and
+        // drop any stamp left over from the version we just replaced.
+        TryDelete(UpdatePaths.HealthStampPath);
+        TryDelete(UpdatePaths.BootAttemptsPath);
+
+        LaunchRelaunchHelper(currentExe);
+        logger.LogInformation("Applied update to {Version}; launched relaunch helper", newVersion);
+    }
+
+    [SupportedOSPlatform("windows")]
+    public void RestoreBackupAndLaunchHelper()
+    {
+        var currentExe = UpdatePaths.CurrentExePath;
+        var backupPath = UpdatePaths.BackupPath;
+        var failedPath = UpdatePaths.FailedPath;
+
+        // Unlike a crash-loop rollback, here WE are the running-but-not-serving process. Renaming our
+        // own live image on the same volume is legal (overwrite-in-place is not), so we move ourselves
+        // aside to .failed and rename .bak back over the canonical name.
+        TryDelete(failedPath);
+        File.Move(currentExe, failedPath);
+        File.Move(backupPath, currentExe);
+
+        // The restored binary must boot as a settled install, not as one mid-update.
+        TryDelete(UpdatePaths.MarkerPath);
+        TryDelete(UpdatePaths.HealthStampPath);
+        TryDelete(UpdatePaths.BootAttemptsPath);
+
+        LaunchRelaunchHelper(currentExe);
+        logger.LogWarning("Rolled back to the previous binary; launched relaunch helper");
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void LaunchRelaunchHelper(string exePath)
+    {
         var startInfo = new ProcessStartInfo
         {
-            FileName = currentExe,
+            FileName = exePath,
             UseShellExecute = false,
             CreateNoWindow = true,
             WorkingDirectory = UpdatePaths.InstallDirectory,
@@ -101,7 +136,6 @@ internal sealed class UpdateInstaller(ILogger<UpdateInstaller> logger) : IUpdate
         startInfo.ArgumentList.Add(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
         Process.Start(startInfo);
-        logger.LogInformation("Applied update to {Version}; launched relaunch helper", newVersion);
     }
 
     private static async Task<string> ComputeSha256Async(string filePath, CancellationToken cancellationToken)

@@ -24,6 +24,14 @@ if (args.Length > 0)
     }
 }
 
+// Before building anything, self-heal a freshly-applied update that crash-loops on startup: if this
+// binary keeps dying before it can confirm it's serving, restore the previous one and hand off. A
+// returned exit code means a rollback was triggered and we must stop so the helper can relaunch.
+if (Watchdog.CheckOnStartup() is { } watchdogExitCode)
+{
+    return watchdogExitCode;
+}
+
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);

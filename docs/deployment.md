@@ -184,9 +184,14 @@ git tag v1.1.0
 git push origin v1.1.0
 ```
 
-`.github/workflows/release.yml` builds the single-file exe, computes its SHA256, and publishes a GitHub Release with `LeBot.Host.exe` + `LeBot.Host.exe.sha256`. Within `Update:CheckIntervalHours` (24 h) the running bot sees the newer tag, downloads and SHA256-verifies the asset, swaps the binary via two atomic renames, and relaunches through Task Scheduler — then DMs `Update:NotifyChatId` once the new version is up. Set `Update:Mode` to `NotifyOnly`, or `Update:Enabled` to `false`, in `appsettings.Local.json` to turn off auto-apply.
+`.github/workflows/release.yml` builds the single-file exe, computes its SHA256, and publishes a GitHub Release with `LeBot.Host.exe` + `LeBot.Host.exe.sha256`. Within `Update:CheckIntervalHours` (24 h) the running bot sees the newer tag, downloads and SHA256-verifies the asset, swaps the binary via two atomic renames, and relaunches through Task Scheduler. It keeps the previous binary as `LeBot.Host.exe.bak` until the new one **proves it is serving** (Telegram `getMe` + the first poll), and only then deletes `.bak` and DMs `Update:NotifyChatId` "updated to vX". Set `Update:Mode` to `NotifyOnly`, or `Update:Enabled` to `false`, in `appsettings.Local.json` to turn off auto-apply.
 
-**Roll back a bad release (server, admin prompt).** The updater keeps the previous binary as `LeBot.Host.exe.bak`:
+**Automatic rollback (no action needed).** A bad release heals itself two ways:
+
+- If the new build *runs but never starts serving*, the in-process watchdog waits `Update:HealthGateMaxBootAttempts`'s sibling `Update:HealthGateTimeoutMinutes` (default 5), then restores `.bak` and relaunches — you get a "rolled back to the previous version" DM.
+- If the new build *crash-loops on startup* (dies before it can serve), an early-startup self-heal counts boots in `.update-boot-attempts`; once they exceed `Update:HealthGateMaxBootAttempts` (default 3) it restores `.bak` and hands off, leaving the bad binary as `LeBot.Host.exe.failed`.
+
+**Manual rollback (server, admin prompt).** To force it yourself:
 
 ```powershell
 C:\LeBot\LeBot.Host.exe --rollback
