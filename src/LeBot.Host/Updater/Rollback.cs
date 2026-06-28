@@ -1,5 +1,4 @@
 using System.Runtime.Versioning;
-using LeBot.Host.Installer;
 
 namespace LeBot.Host.Updater;
 
