@@ -10,7 +10,7 @@ namespace LeBot.Application.Metrics;
 /// — restarting the process resets to zero, which is the right behaviour for a
 /// "how is this build doing" diagnostic rather than long-term analytics.
 /// </summary>
-public sealed class RepostMetrics
+public sealed class RepostMetrics(TimeProvider timeProvider)
 {
     private long _mediaReposts;
     private long _textReposts;
@@ -20,7 +20,7 @@ public sealed class RepostMetrics
 
     private readonly ConcurrentDictionary<string, long> _byExtractor = new();
 
-    public DateTimeOffset StartedAt { get; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset StartedAt { get; } = timeProvider.GetUtcNow();
     public long MediaReposts => Interlocked.Read(ref _mediaReposts);
     public long TextReposts => Interlocked.Read(ref _textReposts);
     public long FallbackAcks => Interlocked.Read(ref _fallbackAcks);

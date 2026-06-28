@@ -13,7 +13,7 @@ public class HandleIncomingMessageHandlerTests
     private readonly IUrlExtractor _urlExtractor = Substitute.For<IUrlExtractor>();
     private readonly IPlatformExtractor _extractor = Substitute.For<IPlatformExtractor>();
     private readonly ITelegramMessenger _messenger = Substitute.For<ITelegramMessenger>();
-    private readonly RepostMetrics _metrics = new();
+    private readonly RepostMetrics _metrics = new(TimeProvider.System);
     private readonly ILogger<HandleIncomingMessageHandler> _logger = NullLogger<HandleIncomingMessageHandler>.Instance;
 
     private HandleIncomingMessageHandler CreateSut() =>
