@@ -28,15 +28,21 @@ public class TelemetryDtoTests
     }
 
     [Fact]
-    public void HostStat_FailureRate_IsFailuresOverTotal()
+    public void HostStat_Rates_AreSuccessesAndFailuresOverTotal()
     {
-        new HostStat("tiktok.com", Total: 8, Failures: 2).FailureRate.Should().Be(0.25);
+        var host = new HostStat("tiktok.com", Total: 8, Successes: 6, Failures: 2);
+
+        host.SuccessRate.Should().Be(0.75);
+        host.FailureRate.Should().Be(0.25);
     }
 
     [Fact]
-    public void HostStat_FailureRate_EmptyHost_IsZero()
+    public void HostStat_Rates_EmptyHost_AreZero()
     {
-        new HostStat("tiktok.com", Total: 0, Failures: 0).FailureRate.Should().Be(0d);
+        var host = new HostStat("tiktok.com", Total: 0, Successes: 0, Failures: 0);
+
+        host.SuccessRate.Should().Be(0d);
+        host.FailureRate.Should().Be(0d);
     }
 
     [Fact]
@@ -51,6 +57,18 @@ public class TelemetryDtoTests
     {
         new ExtractorStat("YtDlpPlatformExtractor", Total: 0, Successes: 0, Failures: 0)
             .SuccessRate.Should().Be(0d);
+    }
+
+    [Fact]
+    public void VersionStat_SuccessRate_IsSuccessesOverTotal()
+    {
+        new VersionStat("1.4.0", Total: 10, Successes: 9, Failures: 1).SuccessRate.Should().Be(0.9);
+    }
+
+    [Fact]
+    public void VersionStat_SuccessRate_EmptyBuild_IsZero()
+    {
+        new VersionStat("1.4.0", Total: 0, Successes: 0, Failures: 0).SuccessRate.Should().Be(0d);
     }
 
     [Fact]

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>LeBot.Dashboard</RootNamespace>
+    <OutputType>Exe</OutputType>
+    <!-- Dev fallback; tools/publish.ps1 stamps the real version, matching the Host's convention. -->
+    <Version>0.0.0</Version>
+    <InformationalVersion>0.0.0</InformationalVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LeBot.Infrastructure\LeBot.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The single-page UI, baked into the binary so the reader is one self-contained exe with no
+         wwwroot to copy. LogicalName pins the manifest name DashboardPage reads. -->
+    <EmbeddedResource Include="dashboard.html" LogicalName="dashboard.html" />
+  </ItemGroup>
+
+</Project>

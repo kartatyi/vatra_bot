@@ -115,12 +115,12 @@ public class DashboardReportFormatterTests
     {
         var byVolume = new List<HostStat>
         {
-            new("tiktok.com", Total: 320, Failures: 10),
-            new("instagram.com", Total: 110, Failures: 40),
+            new("tiktok.com", Total: 320, Successes: 300, Failures: 10),
+            new("instagram.com", Total: 110, Successes: 60, Failures: 40),
         };
         var byFailureRate = new List<HostStat>
         {
-            new("instagram.com", Total: 110, Failures: 44), // 40%
+            new("instagram.com", Total: 110, Successes: 60, Failures: 44), // 40%
         };
 
         var report = DashboardReportFormatter.Top(byVolume, byFailureRate, failureRateMinVolume: 3);
@@ -135,7 +135,7 @@ public class DashboardReportFormatterTests
     [Fact]
     public void Top_VolumeDataButNoQualifyingFailureRate_ShowsNoneYet()
     {
-        var byVolume = new List<HostStat> { new("tiktok.com", Total: 2, Failures: 0) };
+        var byVolume = new List<HostStat> { new("tiktok.com", Total: 2, Successes: 2, Failures: 0) };
 
         var report = DashboardReportFormatter.Top(byVolume, [], failureRateMinVolume: 3);
 
