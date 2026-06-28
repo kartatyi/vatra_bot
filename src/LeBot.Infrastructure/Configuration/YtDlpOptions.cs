@@ -25,6 +25,17 @@ public sealed class YtDlpOptions
     public string DownloadDirectory { get; init; } = "downloads";
 
     /// <summary>
+    /// <see cref="DownloadDirectory"/> as an absolute path. A relative value is rebased onto the
+    /// executable's own directory rather than the launch working directory, so downloads land beside
+    /// the binary no matter where the process is started from (the same reason the log path is pinned).
+    /// An absolute value passes through unchanged. Every consumer — both embed extractors, the yt-dlp
+    /// extractor, and the cleanup sweep — uses this so they always agree on one location.
+    /// </summary>
+    public string ResolvedDownloadDirectory => Path.IsPathRooted(DownloadDirectory)
+        ? DownloadDirectory
+        : Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, DownloadDirectory));
+
+    /// <summary>
     /// Hard cap on file size in megabytes. Above this we skip the download to save bandwidth
     /// and avoid Telegram's 50&#160;MB upload ceiling.
     /// </summary>
