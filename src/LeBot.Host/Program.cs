@@ -1,7 +1,6 @@
 using LeBot.Application;
 using LeBot.Host.Installer;
 using LeBot.Infrastructure;
-using Microsoft.Extensions.Hosting;
 using Serilog;
 
 // One-shot installer dispatch: any --install / --uninstall arg short-circuits the host build,

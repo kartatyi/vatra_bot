@@ -2,7 +2,7 @@
 
 A Telegram group bot that re-posts the actual video / photo content from TikTok, Instagram Reels, YouTube Shorts, Threads, and other platforms — so the group conversation never has to leave Telegram.
 
-![CI](https://img.shields.io/badge/CI-pending-lightgrey)
+[![CI](https://github.com/kartatyi/vatra_bot/actions/workflows/ci.yml/badge.svg)](https://github.com/kartatyi/vatra_bot/actions/workflows/ci.yml)
 ![Coverage](https://img.shields.io/badge/coverage-pending-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)
@@ -28,7 +28,7 @@ In a group chat, every external link is a context switch — open the app, watch
   - [x] `IPlatformExtractor` strategy + hybrid Instagram embed scraper as the first extractor in the chain
   - [x] Re-post pipeline: single media, `SendMediaGroup` albums, text-only fallback, generic "couldn't extract" acknowledgement
   - [x] Polly retry on transient Telegram errors
-  - [x] CI on GitHub Actions: format, build, test, coverage upload
+  - [x] CI on GitHub Actions: format gate, build, test, per-layer coverage gate
 - [ ] **Phase 2.** Conversational layer.
   - [ ] Per-user dossier storage (EF Core + SQLite -> PostgreSQL)
   - [ ] LLM-backed reply pipeline (provider TBD — see `docs/decisions/0001-phase2-llm-provider.md`)

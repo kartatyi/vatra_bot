@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Http;
 using LeBot.Domain.Common;
 using LeBot.Domain.Media;
 using LeBot.Infrastructure.Configuration;
