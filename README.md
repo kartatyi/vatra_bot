@@ -3,7 +3,7 @@
 A Telegram group bot that re-posts the actual video / photo content from TikTok, Instagram Reels, YouTube Shorts, Threads, and other platforms — so the group conversation never has to leave Telegram.
 
 [![CI](https://github.com/kartatyi/vatra_bot/actions/workflows/ci.yml/badge.svg)](https://github.com/kartatyi/vatra_bot/actions/workflows/ci.yml)
-![Coverage](https://img.shields.io/badge/coverage-pending-lightgrey)
+[![Coverage](https://img.shields.io/badge/coverage-CI--gated-brightgreen)](tools/check-coverage.ps1)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)
 ![C#](https://img.shields.io/badge/C%23-14-239120)
@@ -29,9 +29,10 @@ In a group chat, every external link is a context switch — open the app, watch
   - [x] Re-post pipeline: single media, `SendMediaGroup` albums, text-only fallback, generic "couldn't extract" acknowledgement
   - [x] Polly retry on transient Telegram errors
   - [x] CI on GitHub Actions: format gate, build, test, per-layer coverage gate
+  - [x] Self-update from GitHub Releases — SHA256-verified atomic swap with health-gated rollback and operator DM (activates once the first tagged release is published — see [`docs/decisions/0002-self-update.md`](docs/decisions/0002-self-update.md))
 - [ ] **Phase 2.** Conversational layer.
   - [ ] Per-user dossier storage (EF Core + SQLite -> PostgreSQL)
-  - [ ] LLM-backed reply pipeline (provider TBD — see `docs/decisions/0001-phase2-llm-provider.md`)
+  - [ ] LLM-backed reply pipeline (provider TBD — see [`docs/decisions/0001-phase2-llm-provider.md`](docs/decisions/0001-phase2-llm-provider.md))
   - [ ] Mention / DM routing
   - [ ] Lightweight task vocabulary (reminders, quick lookups, group polls)
 
@@ -42,11 +43,32 @@ In a group chat, every external link is a context switch — open the app, watch
 - `Telegram.Bot`, `YoutubeDLSharp`, `Serilog`, `Polly`
 - xUnit + FluentAssertions + NSubstitute + Coverlet
 
-A baseline knowledge graph of the source tree is checked in under [`docs/graphs/`](docs/graphs/) — open `2026-05-28-src.html` in any browser to navigate the architecture. The graph confirms the three god-nodes (`InstagramEmbedExtractor`, `YtDlpPlatformExtractor`, `TelegramBotMessenger`) and the Clean-Architecture domain isolation.
+## Architecture
+
+Clean Architecture across four projects. Dependencies point inward only — enforced by `.csproj` references, so nothing in `Domain` reaches out to a framework:
+
+```mermaid
+flowchart LR
+    subgraph Host["Host — composition root"]
+        H["Worker Service · DI · config"]
+    end
+    subgraph Infrastructure["Infrastructure — adapters"]
+        I["Telegram · yt-dlp · HTTP · file I/O"]
+    end
+    subgraph Application["Application — use-cases + ports"]
+        A["HandleIncomingMessage · IPlatformExtractor"]
+    end
+    subgraph Domain["Domain — pure C#"]
+        D["MediaItem · ExtractionError · Result&lt;T,E&gt;"]
+    end
+    Host --> Infrastructure --> Application --> Domain
+```
+
+One extractor per platform lives under `Infrastructure/MediaExtraction/<Platform>/` behind the `IPlatformExtractor` port (`CanHandle` + `ExtractAsync`); the resolver picks the first extractor whose `CanHandle(uri)` matches.
+
+A baseline knowledge graph of the source tree is checked in under [`docs/graphs/`](docs/graphs/) — open `2026-05-28-src.html` in any browser to navigate it. The graph confirms the three god-nodes (`InstagramEmbedExtractor`, `YtDlpPlatformExtractor`, `TelegramBotMessenger`) and the Clean-Architecture domain isolation.
 
 ## Quick Start
-
-> Steps 1–3 you can do right now in Telegram. Steps 4–5 start working once the first code commit lands.
 
 ### 1. Create a bot via @BotFather
 
@@ -78,8 +100,8 @@ The bot does **not** need admin rights for Phase 1 — a regular member with gro
 ### 4. Clone and configure locally
 
 ```bash
-git clone https://github.com/<owner>/<repo>.git
-cd <repo>
+git clone https://github.com/kartatyi/vatra_bot.git
+cd vatra_bot
 pwsh tools/fetch-tools.ps1                                          # downloads yt-dlp.exe
 dotnet user-secrets init --project src/LeBot.Host
 dotnet user-secrets set "Telegram:BotToken" "<your-token>" --project src/LeBot.Host
@@ -98,7 +120,7 @@ Post a TikTok / YouTube Shorts / Instagram Reels / Threads URL in the group. The
 - **Rate limits:** Telegram allows ~30 messages/sec globally and ~1/sec per chat. Polly retries `429` / `5xx` with exponential backoff and jitter before giving up.
 - **Group privacy must stay disabled.** Re-enabling it silently breaks link detection — the bot will keep running but never see plain-text messages.
 - **Token rotation:** if a token ever leaks, revoke it via BotFather: `/mybots` → pick the bot → **API Token** → **Revoke current token**. Old token dies instantly.
-- **Instagram image posts are best-effort.** Instagram closed off the public `/embed/captioned/` JSON during development; the embed scraper still tries first and produces a multi-photo album when IG hands data back, otherwise the bot falls through to a text reply built from the post's title and description (which yt-dlp gives us even when there's no video). See `docs/decisions/` or `memory` for the full background.
+- **Instagram image posts are best-effort.** Instagram closed off the public `/embed/captioned/` JSON during development; the embed scraper still tries first and produces a multi-photo album when IG hands data back, otherwise the bot falls through to a text reply built from the post's title and description (which yt-dlp gives us even when there's no video). See [`docs/decisions/`](docs/decisions/) for the full background.
 - **YouTube extraction may degrade without a JS runtime.** yt-dlp warns about missing `deno` for newer YouTube paths. Install `deno` (or `node`) and place it on `PATH` if you start seeing "Some formats may be missing" on Shorts.
 
 ## Contributing

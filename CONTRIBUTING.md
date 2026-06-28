@@ -7,8 +7,8 @@ Thanks for the interest. This project takes code quality seriously — please re
 1. Install the [.NET 10 SDK](https://dotnet.microsoft.com/download).
 2. Clone and build:
    ```bash
-   git clone https://github.com/<owner>/<repo>.git
-   cd <repo>
+   git clone https://github.com/kartatyi/vatra_bot.git
+   cd vatra_bot
    pwsh tools/fetch-tools.ps1           # downloads yt-dlp.exe
    dotnet build
    ```
@@ -37,7 +37,7 @@ Thanks for the interest. This project takes code quality seriously — please re
 
 - xUnit + FluentAssertions + NSubstitute.
 - Unit tests for `Domain` and `Application` are required for new logic.
-- Coverage targets (Domain ≥ 90 %, Application ≥ 80 %, overall ≥ 70 %) — see [`CLAUDE.md`](CLAUDE.md) → **Tests & CI**. Targets, not yet CI-gated.
+- Coverage is gated per layer in CI via [`tools/check-coverage.ps1`](tools/check-coverage.ps1) — a PR below the floor fails. See [`CLAUDE.md`](CLAUDE.md) → **Tests & CI** for the per-layer targets and enforced floors.
 
 ## Commits
 
