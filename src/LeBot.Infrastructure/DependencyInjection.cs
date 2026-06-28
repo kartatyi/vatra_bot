@@ -59,6 +59,7 @@ public static class DependencyInjection
         services.AddSingleton<IReleaseSource, GitHubReleaseSource>();
         services.AddSingleton<IAppVersion, AssemblyAppVersion>();
         services.AddSingleton<IUpdateInstaller, UpdateInstaller>();
+        services.AddSingleton<BotHealthSignal>();
 
         services.AddHostedService<TelegramUpdateDispatcher>();
         services.AddHostedService<DownloadsCleanupService>();
