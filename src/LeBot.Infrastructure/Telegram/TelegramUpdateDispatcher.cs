@@ -1,6 +1,6 @@
 using System.Globalization;
-using System.Text;
 using LeBot.Application.Metrics;
+using LeBot.Application.Telemetry;
 using LeBot.Application.UseCases.HandleIncomingMessage;
 using LeBot.Infrastructure.Configuration;
 using LeBot.Infrastructure.Maintenance;
@@ -22,6 +22,7 @@ public sealed class TelegramUpdateDispatcher(
     ITelegramBotClient bot,
     HandleIncomingMessageHandler handler,
     RepostMetrics metrics,
+    IRepostEventStore eventStore,
     BotHealthSignal health,
     IOptions<TelegramOptions> options,
     TimeProvider timeProvider,
@@ -29,6 +30,15 @@ public sealed class TelegramUpdateDispatcher(
     : BackgroundService
 {
     private static readonly TimeSpan BackoffOnError = TimeSpan.FromSeconds(5);
+
+    // Defaults and caps for the on-demand dashboard reads, kept small so a reply stays well under
+    // Telegram's 4096-char ceiling and a typo can't ask for thousands of rows.
+    private const int DefaultListSize = 5;
+    private const int MaxListSize = 15;
+
+    /// <summary>"By failure rate" ignores hosts below this many posts, so a single 1-of-1 failure can't top it.</summary>
+    private const int FailureRateMinVolume = 3;
+
     private readonly TelegramOptions _options = options.Value;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -121,13 +131,15 @@ public sealed class TelegramUpdateDispatcher(
 
     private async Task<bool> TryHandleCommandAsync(Message message, string text, CancellationToken cancellationToken)
     {
-        var token = text.Split([' ', '\n'], 2, StringSplitOptions.RemoveEmptyEntries)[0];
-        var command = token.TrimStart('/');
+        var parts = text.Split([' ', '\n'], 2, StringSplitOptions.RemoveEmptyEntries);
+        var command = parts[0].TrimStart('/');
         var at = command.IndexOf('@', StringComparison.Ordinal);
         if (at >= 0)
         {
             command = command[..at];
         }
+
+        var argument = parts.Length > 1 ? parts[1] : null;
 
         switch (command.ToLowerInvariant())
         {
@@ -136,7 +148,13 @@ public sealed class TelegramUpdateDispatcher(
                 await ReplyAsync(message, "🟢 OK", cancellationToken);
                 return true;
             case "stats":
-                await ReplyAsync(message, FormatStats(), cancellationToken);
+                await ReplyAsync(message, await BuildStatsAsync(cancellationToken), cancellationToken);
+                return true;
+            case "failures":
+                await ReplyAsync(message, await BuildFailuresAsync(argument, cancellationToken), cancellationToken);
+                return true;
+            case "top":
+                await ReplyAsync(message, await BuildTopAsync(cancellationToken), cancellationToken);
                 return true;
             default:
                 return false;
@@ -150,32 +168,31 @@ public sealed class TelegramUpdateDispatcher(
             replyParameters: new ReplyParameters { MessageId = original.MessageId },
             cancellationToken: cancellationToken);
 
-    private string FormatStats()
+    private async Task<string> BuildStatsAsync(CancellationToken cancellationToken)
     {
         var uptime = timeProvider.GetUtcNow() - metrics.StartedAt;
-        var sb = new StringBuilder();
-        sb.Append("Uptime: ");
-        sb.AppendLine(FormatUptime(uptime));
-        sb.Append("Media reposts: ").Append(metrics.MediaReposts.ToString(CultureInfo.InvariantCulture)).AppendLine();
-        sb.Append("Text reposts: ").Append(metrics.TextReposts.ToString(CultureInfo.InvariantCulture)).AppendLine();
-        sb.Append("Failures: ").Append(metrics.Failures.ToString(CultureInfo.InvariantCulture)).AppendLine();
-        sb.Append("Silent skips: ").Append(metrics.SilentSkips.ToString(CultureInfo.InvariantCulture)).AppendLine();
-
-        if (metrics.ByExtractor.Count > 0)
-        {
-            sb.AppendLine();
-            sb.AppendLine("By extractor:");
-            foreach (var pair in metrics.ByExtractor.OrderByDescending(kv => kv.Value))
-            {
-                sb.Append("  ").Append(pair.Key).Append(": ").AppendLine(pair.Value.ToString(CultureInfo.InvariantCulture));
-            }
-        }
-
-        return sb.ToString().TrimEnd();
+        var allTime = await eventStore.GetStatsAsync(DateTimeOffset.MinValue, cancellationToken);
+        return DashboardReportFormatter.Stats(metrics, uptime, allTime);
     }
 
-    private static string FormatUptime(TimeSpan uptime) =>
-        uptime.TotalDays >= 1
-            ? $"{(int)uptime.TotalDays}d {uptime:hh\\:mm}"
-            : uptime.ToString("hh\\:mm\\:ss", CultureInfo.InvariantCulture);
+    private async Task<string> BuildFailuresAsync(string? argument, CancellationToken cancellationToken)
+    {
+        var limit = ParseListSize(argument);
+        var failures = await eventStore.GetRecentFailuresAsync(limit, cancellationToken);
+        return DashboardReportFormatter.Failures(failures, timeProvider.GetUtcNow());
+    }
+
+    private async Task<string> BuildTopAsync(CancellationToken cancellationToken)
+    {
+        var byVolume = await eventStore.GetTopHostsByVolumeAsync(DefaultListSize, DateTimeOffset.MinValue, cancellationToken);
+        var byFailureRate = await eventStore.GetTopHostsByFailureRateAsync(
+            DefaultListSize, FailureRateMinVolume, DateTimeOffset.MinValue, cancellationToken);
+        return DashboardReportFormatter.Top(byVolume, byFailureRate, FailureRateMinVolume);
+    }
+
+    /// <summary>Reads an optional "/failures N" count, defaulting and clamping it to a safe range.</summary>
+    private static int ParseListSize(string? argument) =>
+        int.TryParse(argument, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n)
+            ? Math.Clamp(n, 1, MaxListSize)
+            : DefaultListSize;
 }

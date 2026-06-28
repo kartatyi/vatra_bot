@@ -176,9 +176,11 @@ It prints a ✓/✗ checklist and exits non-zero if anything is broken, so a dep
 ```
 
 - **Logs** land next to the exe at `C:\LeBot\logs\lebot-<date>.log` — an absolute path, so they never scatter to whatever directory you launched from. The bot prints `Logs: <path>` on startup, and `--install` prints it at the end.
-- **From Telegram**, the bot answers two commands in any chat it's a member of:
+- **From Telegram**, the bot answers these commands in any chat it's a member of:
   - `/ping` — replies `🟢 OK`. Use it from your DM with the bot to confirm it's alive.
-  - `/stats` — uptime, repost counts, and per-extractor tallies since the process started.
+  - `/stats` — uptime and since-boot counters merged with the *durable* all-time rollup (total processed, success rate, failures, distinct chats, since when) read from the repost journal, so the numbers survive restarts and self-updates.
+  - `/failures [N]` — the last N broken links (default 5, max 15) with each one's host, URL, and the error the extractor reported. The fastest way to see *what* is breaking.
+  - `/top` — the busiest platforms by volume and the ones breaking most often (by failure rate, ignoring platforms with very few posts).
 
 Schedule an external monitor (UptimeRobot, your own ping script) to DM `/ping` every N minutes — if it stops answering, you know to investigate.
 
