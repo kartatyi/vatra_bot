@@ -1,0 +1,73 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'          # v1.0.0, v1.4.2, v2.0.0-rc.1 ...
+
+permissions:
+  contents: write     # create the Release and upload assets
+
+jobs:
+  release:
+    name: Build, checksum, publish
+    # Pinned, not windows-latest: a single-file win-x64 publish must run on Windows,
+    # and pinning keeps the produced binary reproducible across runner image bumps.
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # refs/tags/v1.4.0 -> 1.4.0 ; mark X.Y.Z-<pre> tags as prereleases so the
+      # updater (which queries /releases/latest) skips them.
+      - name: Resolve version from tag
+        id: ver
+        shell: pwsh
+        run: |
+          $semver = "${{ github.ref_name }}" -replace '^v', ''
+          if ($semver -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') {
+            Write-Error "Tag '${{ github.ref_name }}' is not a valid semver (vMAJOR.MINOR.PATCH[-pre])."
+            exit 1
+          }
+          "semver=$semver"                       | Out-File $env:GITHUB_OUTPUT -Append
+          "prerelease=$($semver -match '-')"     | Out-File $env:GITHUB_OUTPUT -Append
+
+      # Reuse the same publish script developers run locally, so CI output == local output.
+      - name: Publish single-file win-x64
+        shell: pwsh
+        run: pwsh tools/publish.ps1 -Version ${{ steps.ver.outputs.semver }} -OutputPath publish
+
+      # SHA256 over the exact shipped file, in sha256sum format ("<hex>  <name>")
+      # so `sha256sum -c` works and the updater can fall back to it if needed.
+      - name: Compute SHA256
+        id: hash
+        shell: pwsh
+        run: |
+          $sha = (Get-FileHash publish/LeBot.Host.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$sha  LeBot.Host.exe" | Out-File -Encoding ascii -NoNewline publish/LeBot.Host.exe.sha256
+          "sha256=$sha" | Out-File $env:GITHUB_OUTPUT -Append
+          Write-Host "SHA256: $sha"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          prerelease: ${{ steps.ver.outputs.prerelease == 'True' }}
+          generate_release_notes: true
+          body: |
+            Self-contained single-file Windows x64 build.
+
+            **SHA256 (`LeBot.Host.exe`):**
+            ```
+            ${{ steps.hash.outputs.sha256 }}
+            ```
+          files: |
+            publish/LeBot.Host.exe
+            publish/LeBot.Host.exe.sha256

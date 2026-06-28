@@ -5,6 +5,11 @@
     <RootNamespace>LeBot.Host</RootNamespace>
     <OutputType>Exe</OutputType>
     <UserSecretsId>dotnet-LeBot.Host-7b86f359-622e-4e62-bbdc-2dd3846ce8f3</UserSecretsId>
+    <!-- Dev fallback. The release workflow overrides both via -p:Version / -p:InformationalVersion
+         from the git tag, so a real build reports its release version and a local build reports 0.0.0
+         (which the self-updater treats as "older than any release"). -->
+    <Version>0.0.0</Version>
+    <InformationalVersion>0.0.0</InformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>
