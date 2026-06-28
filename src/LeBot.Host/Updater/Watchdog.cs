@@ -5,7 +5,6 @@ using System.Runtime.Versioning;
 using LeBot.Application.Releases;
 using LeBot.Domain.Common;
 using LeBot.Infrastructure.Maintenance;
-using Microsoft.Extensions.Configuration;
 
 namespace LeBot.Host.Updater;
 
