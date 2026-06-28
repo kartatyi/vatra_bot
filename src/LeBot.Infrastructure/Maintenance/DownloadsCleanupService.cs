@@ -17,13 +17,16 @@ public sealed class DownloadsCleanupService : BackgroundService
     private static readonly TimeSpan MaxFileAge = TimeSpan.FromHours(1);
 
     private readonly YtDlpOptions _options;
+    private readonly TimeProvider _timeProvider;
     private readonly ILogger<DownloadsCleanupService> _logger;
 
     public DownloadsCleanupService(
         IOptions<YtDlpOptions> options,
+        TimeProvider timeProvider,
         ILogger<DownloadsCleanupService> logger)
     {
         _options = options.Value;
+        _timeProvider = timeProvider;
         _logger = logger;
     }
 
@@ -33,7 +36,7 @@ public sealed class DownloadsCleanupService : BackgroundService
         {
             try
             {
-                SweepOnce();
+                Sweep();
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -51,14 +54,16 @@ public sealed class DownloadsCleanupService : BackgroundService
         }
     }
 
-    private void SweepOnce()
+    // internal rather than private so the cutoff logic can be exercised directly in a unit
+    // test without spinning up the background loop and its real-time interval timer.
+    internal void Sweep()
     {
         if (!Directory.Exists(_options.DownloadDirectory))
         {
             return;
         }
 
-        var cutoff = DateTime.UtcNow - MaxFileAge;
+        var cutoff = _timeProvider.GetUtcNow().UtcDateTime - MaxFileAge;
         var deleted = 0;
 
         foreach (var path in Directory.EnumerateFiles(_options.DownloadDirectory))

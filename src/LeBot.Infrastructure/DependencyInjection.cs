@@ -8,6 +8,7 @@ using LeBot.Infrastructure.Telegram;
 using LeBot.Infrastructure.Text;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Telegram.Bot;
 
@@ -24,6 +25,8 @@ public static class DependencyInjection
     {
         services.Configure<TelegramOptions>(configuration.GetSection(TelegramOptions.SectionName));
         services.Configure<YtDlpOptions>(configuration.GetSection(YtDlpOptions.SectionName));
+
+        services.TryAddSingleton(TimeProvider.System);
 
         services.AddSingleton<ITelegramBotClient>(sp =>
         {

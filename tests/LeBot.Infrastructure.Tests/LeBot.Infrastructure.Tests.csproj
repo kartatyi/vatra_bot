@@ -17,12 +17,14 @@
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="NSubstitute" />
     <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
   </ItemGroup>
 
   <ItemGroup>
     <Using Include="Xunit" />
     <Using Include="FluentAssertions" />
     <Using Include="NSubstitute" />
+    <Using Include="Microsoft.Extensions.Time.Testing" />
   </ItemGroup>
 
 </Project>

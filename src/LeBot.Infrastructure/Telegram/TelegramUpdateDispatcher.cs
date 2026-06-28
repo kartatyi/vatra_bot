@@ -22,6 +22,7 @@ public sealed class TelegramUpdateDispatcher(
     HandleIncomingMessageHandler handler,
     RepostMetrics metrics,
     IOptions<TelegramOptions> options,
+    TimeProvider timeProvider,
     ILogger<TelegramUpdateDispatcher> logger)
     : BackgroundService
 {
@@ -140,7 +141,7 @@ public sealed class TelegramUpdateDispatcher(
 
     private string FormatStats()
     {
-        var uptime = DateTimeOffset.UtcNow - metrics.StartedAt;
+        var uptime = timeProvider.GetUtcNow() - metrics.StartedAt;
         var sb = new StringBuilder();
         sb.Append("Uptime: ");
         sb.AppendLine(FormatUptime(uptime));
