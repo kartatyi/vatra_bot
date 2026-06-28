@@ -256,7 +256,97 @@ C:\LeBot\tools\yt-dlp\yt-dlp.exe -U
 
 This is yt-dlp's own self-update — works even without our tooling.
 
-## 10. Uninstall
+## 10. The dashboard reader
+
+The bot journals every processed link to `data/lebot.db` beside the exe. [`LeBot.Dashboard.exe`](../src/LeBot.Dashboard) is a **separate, read-only** reader over that same file — KPI cards, outcomes over time, per-platform reliability, a filterable list of failing links, the per-extractor breakdown, and regressions by version. It is *not* part of the bot process (see [ADR 0005](decisions/0005-local-html-dashboard.md)): the bot stays a clean Worker, and the dashboard can come and go without touching it.
+
+Place it **beside** `LeBot.Host.exe` so it resolves the same `data/lebot.db`, then run it:
+
+```powershell
+C:\LeBot\LeBot.Dashboard.exe
+# Now serving http://127.0.0.1:5005
+```
+
+It binds to **loopback only** — there is no public port and no login. Reach it over the SSH tunnel you already use for the box:
+
+```powershell
+# On your laptop:
+ssh -L 5005:127.0.0.1:5005 <user>@<host>
+# then open http://localhost:5005 in your browser
+```
+
+```text
+bad   bind 0.0.0.0 + add a login          → a public port and home-grown auth to get wrong
+good  bind 127.0.0.1, reach over ssh -L    → the tunnel is the perimeter; nothing new exposed
+```
+
+It opens the database **read-only**, so it can never disturb the bot's telemetry, and WAL lets it read live while the bot writes. Knobs:
+
+```powershell
+C:\LeBot\LeBot.Dashboard.exe --Dashboard:DatabasePath "D:\other\lebot.db"   # point at a different journal
+C:\LeBot\LeBot.Dashboard.exe --urls "http://127.0.0.1:8080"                  # change the port (keep it on 127.0.0.1)
+```
+
+If the database doesn't exist yet (the bot has never run), the page loads with a "journal not found" notice rather than an error — start the bot and refresh.
+
+## 11. Manual local test (developer machine, e.g. `D:\lebot`)
+
+To run the bot and dashboard by hand on your own machine — no Scheduled Task, no `--install`:
+
+**1. Publish both exes.** `tools/publish.ps1` builds the bot *and* the dashboard side by side. It **wipes its output folder first**, so don't point it straight at a folder that already holds your `appsettings.Local.json` — publish to a staging folder and copy the two exes (and `appsettings.json`) across:
+
+```powershell
+pwsh tools/publish.ps1 -OutputPath publish
+Copy-Item publish\LeBot.Host.exe, publish\LeBot.Dashboard.exe, publish\appsettings.json D:\lebot\
+```
+
+**2. Put yt-dlp in place** (the bot needs it; it's gitignored, never committed):
+
+```powershell
+pwsh tools/fetch-tools.ps1
+New-Item -ItemType Directory -Force D:\lebot\tools\yt-dlp | Out-Null
+Copy-Item tools\yt-dlp\yt-dlp.exe D:\lebot\tools\yt-dlp\
+```
+
+**3. Use a SEPARATE test bot token — this is the trap.** Telegram allows only **one** long-poller per token. If you start a local bot with the *same* token the homesrv production bot is using, both poll at once and Telegram answers `409 Conflict` — neither works reliably. So either:
+
+- create a second bot in `@BotFather` purely for testing, **or**
+- stop the homesrv instance first (`Stop-ScheduledTask -TaskName "LeBot"` over your shell to the box).
+
+Set the test token **without committing it** — env var or the gitignored `D:\lebot\appsettings.Local.json`:
+
+```powershell
+$env:Telegram__BotToken = "<your-TEST-token>"      # this shell only
+# or, persisted for D:\lebot, create D:\lebot\appsettings.Local.json (gitignored):
+#   { "Telegram": { "BotToken": "<your-TEST-token>" } }
+```
+
+```text
+bad   reuse the production token locally   → 409 Conflict, both pollers flap
+good  a separate @BotFather test bot       → run local and prod at the same time
+```
+
+**4. Check, then run.** `cd` into the folder first — config, logs, downloads, and the journal pin themselves beside the exe, but yt-dlp resolves against the working directory, so run from `D:\lebot`:
+
+```powershell
+cd D:\lebot
+.\LeBot.Host.exe --doctor      # ✓/✗ config, token, yt-dlp, getMe — does NOT start polling
+.\LeBot.Host.exe               # run in the foreground; Ctrl+C to stop. Logs in D:\lebot\logs\
+```
+
+`--doctor` should print all ✓ (configuration, token present, log dir, yt-dlp found, `getMe` reachable) before you run for real.
+
+**5. Open the dashboard** in a second terminal (it finds `D:\lebot\data\lebot.db` on its own — no `cd` needed):
+
+```powershell
+D:\lebot\LeBot.Dashboard.exe          # http://localhost:5005 (no tunnel needed locally)
+```
+
+Until the bot has reposted at least one link, the dashboard shows a "journal not found" notice — that's expected; send a link, then refresh.
+
+Drop a TikTok/Reels/etc. link in your test chat: the bot reposts the media, and the result shows up in `/stats`, `/failures`, `/top`, and on the dashboard. **Never commit the token, bot handle, or group id** ([CLAUDE.md §Secrets](../CLAUDE.md)) — they belong only in `appsettings.Local.json`, user-secrets, or env vars.
+
+## 12. Uninstall
 
 ```powershell
 Stop-ScheduledTask -TaskName "LeBot"
