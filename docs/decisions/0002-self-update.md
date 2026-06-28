@@ -1,7 +1,7 @@
 # 0002. Bot Self-Update from GitHub Releases
 
 Date: 2026-06-28
-Status: Proposed
+Status: Accepted
 
 ## Context
 
@@ -79,4 +79,4 @@ Each phase is its own PR off `main`. The full file-by-file plan and per-layer te
 
 ---
 
-*This ADR is proposed, not accepted — the user revises and flips the status before any code starts. Decision 5 (rollback depth) is the most worth pushing back on: a leaner v1 could keep `.bak` for manual rollback only and defer the health-gate/self-heal.*
+*Accepted 2026-06-28. Decision 5 is implemented leanest-first: v1 keeps `.bak`, relaunches the new binary via the helper, deletes `.bak` once the new version confirms healthy, and offers a manual `--rollback` verb. The full crash-loop watchdog / early-startup self-heal is tracked as a follow-up — it depends on runtime behaviour that can't be exercised in unit tests.*
