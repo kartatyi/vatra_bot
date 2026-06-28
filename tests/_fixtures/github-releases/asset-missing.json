@@ -1,0 +1,12 @@
+{
+  "tag_name": "v1.4.0",
+  "name": "Release 1.4.0",
+  "body": "No matching asset.",
+  "assets": [
+    {
+      "name": "SomethingElse.zip",
+      "browser_download_url": "https://example.test/download/v1.4.0/SomethingElse.zip",
+      "digest": "sha256:abc123def4567890abc123def4567890abc123def4567890abc123def4567890"
+    }
+  ]
+}

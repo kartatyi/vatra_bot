@@ -11,6 +11,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="LeBot.Infrastructure.Tests" />
+    <!-- Lets NSubstitute (Castle DynamicProxy) mock internal ports such as IUpdateInstaller. -->
+    <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
   </ItemGroup>
 
   <ItemGroup>

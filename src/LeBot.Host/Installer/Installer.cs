@@ -19,7 +19,7 @@ namespace LeBot.Host.Installer;
 /// </summary>
 internal static class Installer
 {
-    private const string TaskName = "LeBot";
+    internal const string TaskName = "LeBot";
     private const string YtDlpUrl = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
 
     public static int Run(string[] args)
@@ -180,7 +180,7 @@ internal static class Installer
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    private static bool IsRunningAsAdministrator()
+    internal static bool IsRunningAsAdministrator()
     {
         using var identity = WindowsIdentity.GetCurrent();
         var principal = new WindowsPrincipal(identity);
@@ -188,7 +188,7 @@ internal static class Installer
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    private static int RelaunchElevated(string[] args)
+    internal static int RelaunchElevated(string[] args)
     {
         Console.WriteLine("This action needs administrator rights. A UAC prompt will appear.");
 
@@ -218,7 +218,7 @@ internal static class Installer
         }
     }
 
-    private static string GetCurrentExePath()
+    internal static string GetCurrentExePath()
     {
         var moduleName = Process.GetCurrentProcess().MainModule?.FileName;
         return !string.IsNullOrEmpty(moduleName) ? moduleName : Environment.ProcessPath
@@ -365,7 +365,7 @@ internal static class Installer
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    private static void RunSchtasks(string arguments)
+    internal static void RunSchtasks(string arguments)
     {
         var psi = new ProcessStartInfo("schtasks.exe", arguments)
         {

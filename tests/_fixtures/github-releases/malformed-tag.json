@@ -1,0 +1,12 @@
+{
+  "tag_name": "not-a-version",
+  "name": "Broken release",
+  "body": "Tag does not parse.",
+  "assets": [
+    {
+      "name": "LeBot.Host.exe",
+      "browser_download_url": "https://example.test/download/LeBot.Host.exe",
+      "digest": "sha256:abc123def4567890abc123def4567890abc123def4567890abc123def4567890"
+    }
+  ]
+}

@@ -1,16 +1,27 @@
 using LeBot.Application;
 using LeBot.Host.Installer;
+using LeBot.Host.Updater;
 using LeBot.Infrastructure;
 using Serilog;
 
-// One-shot installer dispatch: any --install / --uninstall arg short-circuits the host build,
-// runs the installer (which self-elevates and either registers or removes the Scheduled Task),
-// and exits. Anything else (no args, normal launch under Task Scheduler) falls through to the
-// regular Host build.
-if (args.Length > 0 && (args[0].Equals("--install", StringComparison.OrdinalIgnoreCase)
-    || args[0].Equals("--uninstall", StringComparison.OrdinalIgnoreCase)))
+// One-shot verb dispatch: an --install / --uninstall / --apply-update / --rollback arg
+// short-circuits the host build, runs the matching one-shot, and exits. --install/--uninstall
+// register or remove the Scheduled Task; --apply-update is the detached relaunch helper spawned
+// after a self-update swap; --rollback restores the previous binary. Anything else (no args,
+// normal launch under Task Scheduler) falls through to the regular Host build.
+if (args.Length > 0)
 {
-    return Installer.Run(args);
+    var verb = args[0].ToLowerInvariant();
+    switch (verb)
+    {
+        case "--install":
+        case "--uninstall":
+            return Installer.Run(args);
+        case "--apply-update":
+            return ApplyUpdate.Run(args);
+        case "--rollback":
+            return Rollback.Run(args);
+    }
 }
 
 var builder = Host.CreateApplicationBuilder(args);
