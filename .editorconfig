@@ -88,7 +88,26 @@ dotnet_naming_symbols.interface_symbols.applicable_kinds = interface
 dotnet_naming_style.i_prefixed_pascal.required_prefix = I
 dotnet_naming_style.i_prefixed_pascal.capitalization  = pascal_case
 
-# Private fields use _camelCase
+# const and static readonly fields are PascalCase. The analyzer treats both as "fields",
+# so these carve-outs must precede the private-field rule below — otherwise it demands a
+# '_' prefix on PascalCase constants (IDE1006). First matching rule wins.
+dotnet_naming_rule.const_fields_pascal_case.severity = warning
+dotnet_naming_rule.const_fields_pascal_case.symbols  = const_field_symbols
+dotnet_naming_rule.const_fields_pascal_case.style    = pascal_case_style
+
+dotnet_naming_symbols.const_field_symbols.applicable_kinds           = field
+dotnet_naming_symbols.const_field_symbols.applicable_accessibilities = *
+dotnet_naming_symbols.const_field_symbols.required_modifiers         = const
+
+dotnet_naming_rule.static_readonly_fields_pascal_case.severity = warning
+dotnet_naming_rule.static_readonly_fields_pascal_case.symbols  = static_readonly_field_symbols
+dotnet_naming_rule.static_readonly_fields_pascal_case.style    = pascal_case_style
+
+dotnet_naming_symbols.static_readonly_field_symbols.applicable_kinds           = field
+dotnet_naming_symbols.static_readonly_field_symbols.applicable_accessibilities = *
+dotnet_naming_symbols.static_readonly_field_symbols.required_modifiers         = static,readonly
+
+# Private (instance, mutable) fields use _camelCase
 dotnet_naming_rule.private_fields_underscore.severity = warning
 dotnet_naming_rule.private_fields_underscore.symbols  = private_field_symbols
 dotnet_naming_rule.private_fields_underscore.style    = underscore_camel_case

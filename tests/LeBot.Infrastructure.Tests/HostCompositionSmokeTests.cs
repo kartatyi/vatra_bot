@@ -1,7 +1,6 @@
 using LeBot.Application;
 using LeBot.Application.Ports;
 using LeBot.Application.UseCases.HandleIncomingMessage;
-using LeBot.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
