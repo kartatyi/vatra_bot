@@ -79,4 +79,9 @@ Each phase is its own PR off `main`. The full file-by-file plan and per-layer te
 
 ---
 
-*Accepted 2026-06-28. Decision 5 is implemented leanest-first: v1 keeps `.bak`, relaunches the new binary via the helper, deletes `.bak` once the new version confirms healthy, and offers a manual `--rollback` verb. The full crash-loop watchdog / early-startup self-heal is tracked as a follow-up — it depends on runtime behaviour that can't be exercised in unit tests.*
+*Accepted 2026-06-28. Decision 5 shipped in two steps. First, leanest: keep `.bak`, relaunch the new binary via the helper, delete `.bak` once the version confirms healthy, plus a manual `--rollback` verb. Then the full health-gate / self-heal (`feat/self-update-watchdog`):*
+
+- *Promotion is gated on **proven service**, not a launched process — the long-poll dispatcher trips an in-process `BotHealthSignal` after `getMe` + the first poll, and only then does the updater delete `.bak` and DM "updated to vX".*
+- *An **in-process watchdog** gives a freshly-applied build `Update:HealthGateTimeoutMinutes` to start serving; if it runs but never does, the updater restores `.bak` in place and relaunches ("rolled back to the previous version").*
+- *An **early-startup self-heal** (`LeBot.Host.Updater.Watchdog`, before the host is built) counts boot attempts of the pending version in `.update-boot-attempts`; once they exceed `Update:HealthGateMaxBootAttempts` with no health stamp, it restores `.bak` and hands off — the backstop for a crash-loop that dies before the watchdog window opens.*
+- *The decision (promote / roll back / keep waiting) is the pure `UpdateWatchdog.Evaluate`, unit-tested as a truth table; the file/OS orchestration stays manual-smoke as the ADR intended.*

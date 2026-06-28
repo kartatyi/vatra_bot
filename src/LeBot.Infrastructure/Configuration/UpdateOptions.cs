@@ -27,6 +27,19 @@ public sealed class UpdateOptions
     /// <summary>Delay before the first check, staggered after yt-dlp's startup update.</summary>
     public int StartupDelayMinutes { get; init; } = 2;
 
+    /// <summary>
+    /// How long a freshly-applied build has to confirm it is serving before the in-process watchdog
+    /// gives up on it and rolls back to the previous binary (ADR&#160;0002, Decision&#160;5).
+    /// </summary>
+    public int HealthGateTimeoutMinutes { get; init; } = 5;
+
+    /// <summary>
+    /// How many times a pending build may boot without ever confirming health before the
+    /// early-startup self-heal restores the previous binary — the backstop for a crash-loop that
+    /// dies before the in-process watchdog window opens.
+    /// </summary>
+    public int HealthGateMaxBootAttempts { get; init; } = 3;
+
     /// <summary>Operator chat to DM about updates. Null disables notifications.</summary>
     public long? NotifyChatId { get; init; }
 }
