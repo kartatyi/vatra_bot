@@ -7,7 +7,7 @@
 
 A Telegram group bot that re-posts media inline so the chat never has to leave Telegram. Drop a TikTok / Reels / YT-Shorts / Threads / X / Reddit link (anything in yt-dlp's ~1800 sites) → the bot replies with the native video or photo, caption intact.
 
-- **Phase 1 — active.** Detect URLs in any group message, extract media, re-post. Always reply with *something*: media, else the post's text, else a "couldn't extract" ack.
+- **Phase 1 — active.** Detect URLs in any group message, extract media, re-post. Reply with media, else the post's text; when extraction yields neither, stay silent — no "couldn't extract" noise.
 - **Phase 2 — planned.** Conversational layer: per-user dossiers, mention/DM replies. See [ADR 0001](docs/decisions/0001-phase2-llm-provider.md).
 
 Quality bar: **code you'd put on a CV.** Every rule below earns its place by keeping it there.

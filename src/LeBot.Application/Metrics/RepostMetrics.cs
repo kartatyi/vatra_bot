@@ -14,7 +14,6 @@ public sealed class RepostMetrics(TimeProvider timeProvider)
 {
     private long _mediaReposts;
     private long _textReposts;
-    private long _fallbackAcks;
     private long _failures;
     private long _silentSkips;
 
@@ -23,7 +22,6 @@ public sealed class RepostMetrics(TimeProvider timeProvider)
     public DateTimeOffset StartedAt { get; } = timeProvider.GetUtcNow();
     public long MediaReposts => Interlocked.Read(ref _mediaReposts);
     public long TextReposts => Interlocked.Read(ref _textReposts);
-    public long FallbackAcks => Interlocked.Read(ref _fallbackAcks);
     public long Failures => Interlocked.Read(ref _failures);
     public long SilentSkips => Interlocked.Read(ref _silentSkips);
     public IReadOnlyDictionary<string, long> ByExtractor => _byExtractor;
@@ -42,8 +40,6 @@ public sealed class RepostMetrics(TimeProvider timeProvider)
             Bump(extractor);
         }
     }
-
-    public void RecordFallbackAck() => Interlocked.Increment(ref _fallbackAcks);
 
     public void RecordFailure(string extractor)
     {

@@ -113,30 +113,18 @@ public sealed class HandleIncomingMessageHandler(
         if (!sawSubstantiveAttempt)
         {
             // Every extractor declined the URL — bare http link to a non-media site, basically.
-            // Stay silent so the chat isn't flooded with "Couldn't extract" for github / news /
-            // blog URLs that nobody wanted reposted in the first place.
+            // Stay silent so the chat isn't flooded with noise for github / news / blog URLs
+            // that nobody wanted reposted in the first place.
             metrics.RecordSilentSkip();
             logger.LogDebug("No extractor claimed {Url} — silent skip", url);
             return;
         }
 
-        // Final acknowledgement so the user always sees a reply for any URL an extractor tried
-        // to extract from and couldn't.
-        var fallback = new MediaPayload(
-            SourceUrl: url,
-            Title: null,
-            Author: null,
-            Items: [],
-            Description: "Couldn't extract media from this link.");
-        await messenger.ReplyWithTextAsync(
-            message.ChatId,
-            message.MessageId,
-            fallback,
-            cancellationToken);
-        metrics.RecordFallbackAck();
-        logger.LogInformation(
-            "Sent extraction-failed acknowledgement for {Url} into chat {ChatId}",
-            url, message.ChatId);
+        // An extractor claimed the URL but produced neither media nor a text fallback. Stay
+        // silent rather than posting a "couldn't extract" notice — a failed extraction shouldn't
+        // add chat noise. The reason was already surfaced in the loop above (a warning for hard
+        // failures, debug otherwise).
+        logger.LogDebug("Nothing extractable from {Url} — staying silent", url);
     }
 
     private static bool HasReplyableText(MediaPayload payload)

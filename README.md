@@ -13,7 +13,7 @@ A Telegram group bot that re-posts the actual video / photo content from TikTok,
 - Watches every message in the group, picks out `http(s)` URLs, and reposts whatever media those URLs point at as a native Telegram reply.
 - Hybrid extraction chain: a custom Instagram embed scraper takes the first pass at `/p/...` posts (image carousels yt-dlp can't see), yt-dlp covers everything else (Reels, TikTok, YouTube Shorts, Threads, X, Reddit, Vimeo, Twitch, Facebook, and the rest of the ~1800 sites it supports).
 - Re-posts as the right Telegram primitive: single `SendVideo` / `SendPhoto`, or `SendMediaGroup` for multi-image carousels, with the post's body text as the caption.
-- Always replies with **something**. When a link is supported but media extraction fails, the bot falls back to the post's title/description as a text reply; when even that's empty, it acknowledges with "Couldn't extract media from this link."
+- When a link is supported but media extraction fails, the bot falls back to the post's title/description as a text reply; when even that's empty, it stays silent rather than posting a "couldn't extract" notice.
 - Polly retries transient Telegram failures (429, 5xx) with exponential backoff + jitter; permanent failures (400, 403) fall through to a source-URL text reply.
 
 ## Why
@@ -26,7 +26,7 @@ In a group chat, every external link is a context switch — open the app, watch
   - [x] Telegram update dispatcher with correlation IDs in the log scope
   - [x] yt-dlp wrapper via `YoutubeDLSharp`
   - [x] `IPlatformExtractor` strategy + hybrid Instagram embed scraper as the first extractor in the chain
-  - [x] Re-post pipeline: single media, `SendMediaGroup` albums, text-only fallback, generic "couldn't extract" acknowledgement
+  - [x] Re-post pipeline: single media, `SendMediaGroup` albums, text-only fallback (silent when there's nothing to repost)
   - [x] Polly retry on transient Telegram errors
   - [x] CI on GitHub Actions: format gate, build, test, per-layer coverage gate
 - [ ] **Phase 2.** Conversational layer.
