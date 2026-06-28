@@ -140,3 +140,12 @@ dotnet_diagnostic.CA1054.severity = suggestion
 dotnet_diagnostic.CA2007.severity = none
 # do not pass literals as localized parameters
 dotnet_diagnostic.CA1303.severity = none
+
+##############################
+# Generated code
+##############################
+# EF Core migration scaffolding is tool-generated (block-scoped namespaces, #nullable disable, its own
+# naming). Mark it generated so analyzers and `dotnet format --verify-no-changes` leave it alone —
+# otherwise every `dotnet ef migrations add` would need hand-reformatting to stay CI-green.
+[**/Migrations/*.cs]
+generated_code = true

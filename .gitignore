@@ -34,6 +34,14 @@ logs/
 *.log
 
 ##############################
+# Runtime data (telemetry / dashboard DB)
+##############################
+data/
+*.db
+*.db-shm
+*.db-wal
+
+##############################
 # Test results / coverage
 ##############################
 TestResults/
