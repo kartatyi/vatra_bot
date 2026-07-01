@@ -2,6 +2,7 @@ using LeBot.Application.Ports;
 using LeBot.Infrastructure.Configuration;
 using LeBot.Infrastructure.Diagnostics;
 using LeBot.Infrastructure.Maintenance;
+using LeBot.Infrastructure.MediaExtraction.AutoRia;
 using LeBot.Infrastructure.MediaExtraction.Instagram;
 using LeBot.Infrastructure.MediaExtraction.Threads;
 using LeBot.Infrastructure.MediaExtraction.ThreadsEmbed;
@@ -71,6 +72,9 @@ public static class DependencyInjection
         services.AddSingleton<IPlatformExtractor, InstagramApiExtractor>();
         services.AddSingleton<IPlatformExtractor, ThreadsVideoExtractor>();
         services.AddSingleton<IPlatformExtractor, ThreadsEmbedExtractor>();
+        // auto.ria isn't in yt-dlp's site list; this extractor reposts an advert's photo gallery with
+        // a spec caption. It claims only auto.ria advert URLs, so ordering ahead of yt-dlp is harmless.
+        services.AddSingleton<IPlatformExtractor, AutoRiaExtractor>();
         services.AddSingleton<IPlatformExtractor, YtDlpPlatformExtractor>();
 
         services.AddSingleton<IReleaseSource, GitHubReleaseSource>();
