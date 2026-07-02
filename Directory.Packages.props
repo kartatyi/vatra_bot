@@ -29,6 +29,15 @@
     <PackageVersion Include="Polly" Version="8.5.2" />
   </ItemGroup>
 
+  <ItemGroup Label="Persistence (EF Core + SQLite)">
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.7" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.7" />
+    <!-- EF Core 10.0.7 pulls SQLitePCLRaw 2.1.11 transitively, which carries a high-severity advisory
+         (GHSA-2m69-gcr7-jv3q). Pin the native bundle forward to the patched 3.0.x line; referenced
+         directly in Infrastructure so the bump wins over the transitive version. -->
+    <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
+  </ItemGroup>
+
   <ItemGroup Label="Testing">
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageVersion Include="xunit" Version="2.9.3" />

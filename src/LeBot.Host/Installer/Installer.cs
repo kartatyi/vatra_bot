@@ -1,6 +1,10 @@
 using System.Diagnostics;
 using System.Security.Principal;
 using System.Text.Json;
+using LeBot.Host.Configuration;
+using LeBot.Host.Diagnostics;
+using LeBot.Infrastructure.Configuration;
+using LeBot.Infrastructure.Diagnostics;
 
 namespace LeBot.Host.Installer;
 
@@ -12,17 +16,18 @@ namespace LeBot.Host.Installer;
 ///   * triggers at boot and starts immediately on creation;
 ///   * restarts once a minute for up to 999 attempts on crash.
 ///
-/// The installer also creates the runtime folders, downloads <c>yt-dlp.exe</c> if it's missing,
-/// and persists <c>Telegram__BotToken</c> + <c>DOTNET_ENVIRONMENT=Production</c> at machine scope
-/// so the LocalSystem account sees them. <c>--uninstall</c> removes the task; the binary and
-/// folders are left alone for the operator to delete by hand.
+/// The installer also creates the runtime folders, writes the bot token to <c>appsettings.Local.json</c>
+/// and an editable <c>appsettings.json</c> next to the binary, downloads <c>yt-dlp.exe</c> if it's
+/// missing, and finishes by running <c>--doctor</c> so a broken install surfaces before the operator
+/// walks away. <c>--uninstall</c> removes the task; the binary and folders are left alone for the
+/// operator to delete by hand.
 /// </summary>
 internal static class Installer
 {
     internal const string TaskName = "LeBot";
     private const string YtDlpUrl = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
 
-    public static int Run(string[] args)
+    public static async Task<int> Run(string[] args)
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -38,15 +43,16 @@ internal static class Installer
 
         return command switch
         {
-            "--install" => DoInstall(),
+            "--install" => await DoInstall(),
             "--uninstall" => DoUninstall(),
             _ => 1,
         };
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    private static int DoInstall()
+    private static async Task<int> DoInstall()
     {
+        Doctor.EnableUtf8Output();
         Console.WriteLine("=== LeBot installer ===");
         Console.WriteLine();
 
@@ -88,13 +94,27 @@ internal static class Installer
         EnsureDirectory(Path.Combine(workDir, "logs"));
         Console.WriteLine("✓ Folders created.");
 
+        // Drop an editable appsettings.json next to the exe if one isn't already there. The binary
+        // embeds these same defaults — logging works even without this file — but a visible copy lets
+        // the operator tune Serilog / YtDlp without a rebuild. appsettings.Local.json still overrides it.
+        var appSettingsPath = Path.Combine(workDir, "appsettings.json");
+        if (File.Exists(appSettingsPath))
+        {
+            Console.WriteLine($"✓ {Path.GetFileName(appSettingsPath)} already present.");
+        }
+        else
+        {
+            File.WriteAllText(appSettingsPath, EmbeddedAppConfiguration.ReadDefaults());
+            Console.WriteLine($"✓ Wrote default {Path.GetFileName(appSettingsPath)}.");
+        }
+
         var ytDlpPath = Path.Combine(workDir, "tools", "yt-dlp", "yt-dlp.exe");
         if (!File.Exists(ytDlpPath))
         {
             Console.Write("Downloading yt-dlp.exe ... ");
             try
             {
-                DownloadYtDlp(ytDlpPath).GetAwaiter().GetResult();
+                await DownloadYtDlp(ytDlpPath);
                 Console.WriteLine("done.");
             }
             catch (Exception ex)
@@ -140,9 +160,29 @@ internal static class Installer
 
         Console.WriteLine();
         Console.WriteLine("All done. The bot is now running under the LocalSystem account.");
-        Console.WriteLine($"Logs:        {Path.Combine(workDir, "logs")}");
+
+        // Resolve the log path through the same code the running bot uses, so what we print here is
+        // exactly where the logs will land — beside the binary, not in whatever CWD this admin shell had.
+        var configuration = StandaloneConfiguration.ForExecutable(workDir);
+        var logDirectory = LogPathResolver.ResolveLogDirectory(configuration, workDir);
+        Console.WriteLine($"Logs:        {logDirectory}");
         Console.WriteLine($"Stop:        Stop-ScheduledTask -TaskName {TaskName}");
         Console.WriteLine($"Uninstall:   {Path.GetFileName(exePath)} --uninstall");
+
+        // Verify the install before the operator walks away. The bot runs as LocalSystem, so evaluate
+        // the cookies/account check against that identity — not the elevated admin running --install.
+        // Bound the network/process probes so a hung getMe can't wedge the installer.
+        Console.WriteLine();
+        Console.WriteLine("Post-install checks (--doctor):");
+        Console.WriteLine();
+        using var doctorTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var checks = await Doctor.GatherAsync(
+            configuration,
+            workDir,
+            doctorTimeout.Token,
+            new FixedHostAccountInfo(isLocalSystem: true));
+        Doctor.WriteReport(Console.Out, checks);
+
         Console.WriteLine();
         Console.WriteLine("Send /ping to the bot from any chat to confirm it's online.");
         return 0;

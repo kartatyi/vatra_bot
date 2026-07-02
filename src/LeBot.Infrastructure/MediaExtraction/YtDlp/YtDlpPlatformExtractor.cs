@@ -27,12 +27,12 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
         _options = options.Value;
         _logger = logger;
 
-        Directory.CreateDirectory(_options.DownloadDirectory);
+        Directory.CreateDirectory(_options.ResolvedDownloadDirectory);
 
         _ytdl = new YoutubeDL
         {
             YoutubeDLPath = ExecutablePathResolver.Resolve(_options.BinaryPath),
-            OutputFolder = _options.DownloadDirectory,
+            OutputFolder = _options.ResolvedDownloadDirectory,
         };
 
         if (!string.IsNullOrEmpty(_options.FfmpegPath))
