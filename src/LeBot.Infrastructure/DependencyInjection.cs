@@ -106,4 +106,29 @@ public static class DependencyInjection
 
         return services;
     }
+
+    /// <summary>
+    /// Registers a <b>read-only</b> view over the repost journal — exactly what the local HTML dashboard
+    /// needs and nothing else (no Telegram client, no extractors, no hosted services), so the dashboard
+    /// stays a clean reader rather than dragging in the whole bot. The SQLite file is opened in read-only
+    /// mode so the dashboard process can never mutate the bot's telemetry; WAL (enabled by the bot) lets it
+    /// read live alongside the running bot's writes. Mirrors the writer's connection settings otherwise.
+    /// </summary>
+    /// <param name="resolvedDatabasePath">Absolute path to the same SQLite file the bot writes.</param>
+    public static IServiceCollection AddRepostJournalReader(this IServiceCollection services, string resolvedDatabasePath)
+    {
+        services.AddDbContextFactory<LeBotDbContext>(dbOptions =>
+        {
+            var connectionString = new SqliteConnectionStringBuilder
+            {
+                DataSource = resolvedDatabasePath,
+                Mode = SqliteOpenMode.ReadOnly,
+                DefaultTimeout = 30,
+            }.ToString();
+            dbOptions.UseSqlite(connectionString);
+        });
+        services.AddSingleton<IRepostEventStore, SqliteRepostEventStore>();
+
+        return services;
+    }
 }
