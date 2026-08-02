@@ -6,6 +6,7 @@ using LeBot.Application.Ports;
 using LeBot.Domain.Common;
 using LeBot.Domain.Media;
 using LeBot.Infrastructure.Configuration;
+using LeBot.Infrastructure.MediaExtraction.Threads;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Polly;
@@ -81,22 +82,7 @@ public sealed partial class ThreadsEmbedExtractor : IPlatformExtractor
         || status == HttpStatusCode.TooManyRequests
         || ((int)status >= 500 && (int)status < 600);
 
-    public bool CanHandle(Uri url)
-    {
-        var host = url.Host;
-        if (host.StartsWith("www.", StringComparison.OrdinalIgnoreCase))
-        {
-            host = host[4..];
-        }
-
-        if (!host.Equals("threads.com", StringComparison.OrdinalIgnoreCase)
-            && !host.Equals("threads.net", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        return url.AbsolutePath.Contains("/post/", StringComparison.OrdinalIgnoreCase);
-    }
+    public bool CanHandle(Uri url) => ThreadsUrl.IsPost(url);
 
     public async Task<Result<MediaPayload, ExtractionError>> ExtractAsync(
         Uri url,

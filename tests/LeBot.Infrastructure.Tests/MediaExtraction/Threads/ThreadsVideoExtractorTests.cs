@@ -15,6 +15,7 @@ public class ThreadsVideoExtractorTests
     [InlineData("https://www.threads.com/@playpadel.camp/post/DaDO9QigB65", true)]
     [InlineData("https://threads.com/@u/post/abc", true)]
     [InlineData("https://www.threads.net/@u/post/abc", true)]
+    [InlineData("https://www.threads.com/share/_leUBLSSL/", true)] // app shortlink → 302 to /@u/post/…
     [InlineData("https://www.threads.com/@playpadel.camp", false)]
     [InlineData("https://www.instagram.com/p/abc/", false)]
     [InlineData("https://tiktok.com/@u/video/123", false)]
