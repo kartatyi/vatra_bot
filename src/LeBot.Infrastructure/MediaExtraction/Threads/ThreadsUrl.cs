@@ -31,4 +31,29 @@ internal static class ThreadsUrl
         return path.Contains("/post/", StringComparison.OrdinalIgnoreCase)
             || path.StartsWith("/share/", StringComparison.OrdinalIgnoreCase);
     }
+
+    /// <summary>
+    /// The post's shortcode — the <c>DbsHKtBiGxC</c> in <c>/@user/post/DbsHKtBiGxC</c>. Null for a
+    /// <c>/share/</c> shortlink, which only names its post once the redirect has been followed.
+    /// </summary>
+    internal static string? Shortcode(Uri url)
+    {
+        var segments = url.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        for (var i = 0; i < segments.Length - 1; i++)
+        {
+            if (segments[i].Equals("post", StringComparison.OrdinalIgnoreCase)
+                && IsShortcodeShaped(segments[i + 1]))
+            {
+                return segments[i + 1];
+            }
+        }
+
+        return null;
+    }
+
+    // Shortcodes are base64url alphabet. Checking the shape here is what makes the value safe to
+    // inline into the page-side script the browser fallback evaluates.
+    private static bool IsShortcodeShaped(string segment) =>
+        segment.Length is > 0 and <= 32
+        && segment.All(static c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_');
 }

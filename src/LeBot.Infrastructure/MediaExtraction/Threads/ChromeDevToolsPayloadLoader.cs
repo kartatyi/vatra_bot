@@ -10,15 +10,14 @@ using Microsoft.Extensions.Options;
 namespace LeBot.Infrastructure.MediaExtraction.Threads;
 
 /// <summary>
-/// Resolves a page's playable video URL by loading it in a headless Chromium browser (system
-/// Chrome, then Edge) and reading the rendered &lt;video&gt; element. It speaks the Chrome DevTools
-/// Protocol directly over a WebSocket — no Playwright/Selenium driver to package — so it stays
-/// compatible with the single-file, self-contained deployment (Playwright's driver isn't found
-/// under single-file publish; see ADR 0006). The browser is a <em>runtime</em> prerequisite, not
-/// shipped: when none is present the resolver returns <c>null</c> and the caller keeps today's
-/// thumbnail behaviour.
+/// Loads a Threads post's payload block in a headless Chromium browser (system Chrome, then Edge).
+/// It speaks the Chrome DevTools Protocol directly over a WebSocket — no Playwright/Selenium driver
+/// to package — so it stays compatible with the single-file, self-contained deployment (Playwright's
+/// driver isn't found under single-file publish; see ADR 0006). The browser is a <em>runtime</em>
+/// prerequisite, not shipped: when none is present the loader returns <c>null</c> and the caller
+/// falls back to the og:image card, as it did before any browser path existed.
 /// </summary>
-internal sealed class ChromeDevToolsVideoResolver : IBrowserVideoResolver, IDisposable
+internal sealed class ChromeDevToolsPayloadLoader : IBrowserPayloadLoader, IDisposable
 {
     // Searched in order when Threads:BrowserPath is unset. Chrome first, then Edge (always present
     // on Windows 11) so the feature works out of the box even without Chrome installed.
@@ -35,29 +34,29 @@ internal sealed class ChromeDevToolsVideoResolver : IBrowserVideoResolver, IDisp
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
         "Chrome/120.0.0.0 Safari/537.36";
 
-    // Threads videos are an occasional case; one browser at a time keeps memory bounded even when
-    // several links land together.
+    // This path is the exception, not the rule — one browser at a time keeps memory bounded even
+    // when several links land together.
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly ThreadsOptions _options;
-    private readonly ILogger<ChromeDevToolsVideoResolver> _logger;
+    private readonly ILogger<ChromeDevToolsPayloadLoader> _logger;
     private readonly Lazy<string?> _browserPath;
 
-    public ChromeDevToolsVideoResolver(
+    public ChromeDevToolsPayloadLoader(
         IOptions<ThreadsOptions> options,
-        ILogger<ChromeDevToolsVideoResolver> logger)
+        ILogger<ChromeDevToolsPayloadLoader> logger)
     {
         _options = options.Value;
         _logger = logger;
         _browserPath = new Lazy<string?>(ResolveBrowserPath);
     }
 
-    public async Task<string?> ResolveVideoUrlAsync(Uri pageUrl, CancellationToken cancellationToken)
+    public async Task<string?> LoadPostPayloadAsync(Uri pageUrl, string shortcode, CancellationToken cancellationToken)
     {
         var browser = _browserPath.Value;
         if (browser is null)
         {
             _logger.LogWarning(
-                "No Chromium browser found for Threads video extraction (set Threads:BrowserPath). Falling back to thumbnail.");
+                "No Chromium browser found for the Threads fallback (set Threads:BrowserPath). Falling back to the og:image card.");
             return null;
         }
 
@@ -66,19 +65,19 @@ internal sealed class ChromeDevToolsVideoResolver : IBrowserVideoResolver, IDisp
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(_options.PageTimeoutSeconds));
-            return await RunAsync(browser, pageUrl, timeout.Token);
+            return await RunAsync(browser, pageUrl, shortcode, timeout.Token);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             _logger.LogWarning(
-                "Threads video resolution timed out after {Seconds}s for {Host}",
+                "Threads payload load timed out after {Seconds}s for {Host}",
                 _options.PageTimeoutSeconds, pageUrl.Host);
             return null;
         }
         catch (Exception ex) when (ex is WebSocketException or JsonException or IOException
             or System.ComponentModel.Win32Exception or HttpRequestException or InvalidOperationException)
         {
-            _logger.LogWarning(ex, "Threads headless extraction failed for {Host}; falling back to thumbnail", pageUrl.Host);
+            _logger.LogWarning(ex, "Threads headless load failed for {Host}; falling back to the og:image card", pageUrl.Host);
             return null;
         }
         finally
@@ -87,7 +86,7 @@ internal sealed class ChromeDevToolsVideoResolver : IBrowserVideoResolver, IDisp
         }
     }
 
-    private async Task<string?> RunAsync(string browserPath, Uri pageUrl, CancellationToken ct)
+    private async Task<string?> RunAsync(string browserPath, Uri pageUrl, string shortcode, CancellationToken ct)
     {
         var profileDir = Path.Combine(Path.GetTempPath(), "lebot-cdp-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(profileDir);
@@ -109,7 +108,7 @@ internal sealed class ChromeDevToolsVideoResolver : IBrowserVideoResolver, IDisp
             var sessionId = await cdp.OpenPageAsync(ct);
             await cdp.SendAsync("Page.navigate", new { url = pageUrl.AbsoluteUri }, sessionId, ct);
 
-            return await PollForVideoUrlAsync(cdp, sessionId, ct);
+            return await PollForPayloadAsync(cdp, sessionId, shortcode, ct);
         }
         finally
         {
@@ -187,12 +186,28 @@ internal sealed class ChromeDevToolsVideoResolver : IBrowserVideoResolver, IDisp
             ?? throw new InvalidOperationException("DevTools /json/version carried no webSocketDebuggerUrl");
     }
 
-    private async Task<string?> PollForVideoUrlAsync(CdpConnection cdp, string sessionId, CancellationToken ct)
+    private async Task<string?> PollForPayloadAsync(
+        CdpConnection cdp,
+        string sessionId,
+        string shortcode,
+        CancellationToken ct)
     {
-        // Threads renders the post media a beat after navigation; poll the first <video> element
-        // until it carries a real (non-blob) source, or the overall timeout cancels us.
-        const string expression =
-            "(() => { const v = document.querySelector('video'); return v ? (v.currentSrc || v.src || '') : ''; })()";
+        // The payload lands a beat after navigation, so poll until a block describes *this* post.
+        // Matching on the post's own code is what keeps a neighbour's media — the recommendation
+        // feed further down the page carries plenty — out of the answer. The code is validated as
+        // base64url by ThreadsUrl.Shortcode before it reaches this string.
+        var expression = $$"""
+            (() => {
+              for (const s of document.querySelectorAll('script[type="application/json"]')) {
+                const t = s.textContent || '';
+                if (t.includes('"code":"{{shortcode}}"')
+                    && (t.includes('image_versions2') || t.includes('video_versions'))) {
+                  return t;
+                }
+              }
+              return '';
+            })()
+            """;
 
         while (true)
         {
@@ -207,8 +222,7 @@ internal sealed class ChromeDevToolsVideoResolver : IBrowserVideoResolver, IDisp
             var value = result
                 .GetProperty("result").GetProperty("result").GetProperty("value").GetString();
 
-            if (!string.IsNullOrEmpty(value)
-                && value.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            if (!string.IsNullOrEmpty(value))
             {
                 return value;
             }
@@ -219,9 +233,9 @@ internal sealed class ChromeDevToolsVideoResolver : IBrowserVideoResolver, IDisp
 
     private string? ResolveBrowserPath()
     {
-        if (!_options.VideoExtractionEnabled)
+        if (!_options.BrowserFallbackEnabled)
         {
-            _logger.LogInformation("Threads headless video extraction disabled via Threads:VideoExtractionEnabled");
+            _logger.LogInformation("Threads headless fallback disabled via Threads:BrowserFallbackEnabled");
             return null;
         }
 
@@ -235,7 +249,7 @@ internal sealed class ChromeDevToolsVideoResolver : IBrowserVideoResolver, IDisp
             var expanded = Environment.ExpandEnvironmentVariables(candidate);
             if (File.Exists(expanded))
             {
-                _logger.LogInformation("Threads video extractor using browser {Browser}", expanded);
+                _logger.LogInformation("Threads browser fallback using {Browser}", expanded);
                 return expanded;
             }
         }

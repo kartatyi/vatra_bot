@@ -1,0 +1,19 @@
+<!doctype html>
+<!--
+  Shape of a real threads.com post page, trimmed to what the parser reads.
+
+  The page describes TWO posts, in the order Threads emits them: first a clip from the
+  recommendation feed that renders far below the post, then the post the URL actually names
+  (DbsHKtBiGxC) — a two-photo carousel. Anything that answers "the first media on the page"
+  reposts the stranger's video; that is the bug this fixture pins down.
+-->
+<html lang="en">
+<head>
+<meta property="og:title" content="my name (@haryahahahah) on Threads" />
+<meta property="og:image" content="https://scontent.test/social-card.jpg" />
+<script type="application/json" data-sjs>{"require":[["ScheduledServerJS","handle",null,[{"__bbox":{"result":{"data":{"recommended":{"edges":[{"node":{"thread_items":[{"post":{"pk":"111","code":"RecoFeedClip","user":{"username":"someone.else"},"caption":{"text":"a clip from further down the page"},"media_type":2,"video_versions":[{"type":101,"url":"https://cdn.test/reco-monkey.mp4"}],"image_versions2":{"candidates":[{"width":720,"height":1280,"url":"https://cdn.test/reco-poster.jpg"}]}}}]}}]}}}}}]]]}</script>
+<script type="application/json" data-sjs>{"require":[["ScheduledServerJS","handle",null,[{"__bbox":{"result":{"data":{"data":{"edges":[{"node":{"thread_items":[{"post":{"pk":"222","code":"DbsHKtBiGxC","user":{"username":"haryahahahah"},"caption":{"text":"Kinder Joy, One Piece edition"},"media_type":8,"carousel_media":[{"image_versions2":{"candidates":[{"width":720,"height":1280,"url":"https://cdn.test/first-720.jpg"},{"width":1080,"height":1920,"url":"https://cdn.test/first-1080.jpg"}]}},{"image_versions2":{"candidates":[{"width":1080,"height":1920,"url":"https://cdn.test/second-1080.jpg"}]}}],"image_versions2":{"candidates":[{"width":1080,"height":1920,"url":"https://cdn.test/first-1080.jpg"}]}}}]}}]}}}}}]]]}</script>
+<script type="application/json">not json at all {</script>
+</head>
+<body><div id="barcelona-shell"></div></body>
+</html>
