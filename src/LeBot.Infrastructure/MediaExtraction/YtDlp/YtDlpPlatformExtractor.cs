@@ -73,7 +73,12 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
             {
                 var detail = JoinErrors(metadata.ErrorOutput);
 
-                if (YtDlpErrorClassifier.LooksLikeUnsupportedUrl(detail))
+                // Either yt-dlp refused the URL outright, or only its catch-all [generic] extractor
+                // took it and failed — the shape of a shop / news / blog link that was never media.
+                // Both are "not our platform", not breakage: disown the URL so the handler skips it
+                // silently and it never lands in the journal as a failure.
+                if (YtDlpErrorClassifier.LooksLikeUnsupportedUrl(detail)
+                    || YtDlpErrorClassifier.IsGenericExtractorFailure(detail))
                 {
                     _logger.LogDebug("yt-dlp does not handle {Url} — leaving for other extractors / silent skip", url);
                     return Result<MediaPayload, ExtractionError>.Failure(
