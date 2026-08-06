@@ -13,6 +13,7 @@ namespace LeBot.Infrastructure.MediaCache;
 /// <param name="Description">Payload description, verbatim.</param>
 /// <param name="CachedAtUtc">When the entry was written — the clock the lifetime is measured from.</param>
 /// <param name="Items">The stored media files, in send order.</param>
+/// <param name="FollowUps">The chained parts of the post, in order; empty for an ordinary post.</param>
 internal sealed record CachedPayloadDocument(
     int SchemaVersion,
     string NormalizedUrl,
@@ -22,7 +23,13 @@ internal sealed record CachedPayloadDocument(
     string? Author,
     string? Description,
     DateTimeOffset CachedAtUtc,
-    IReadOnlyList<CachedMediaItem> Items)
+    IReadOnlyList<CachedMediaItem> Items,
+    IReadOnlyList<CachedSegment> FollowUps)
 {
-    public const int CurrentSchemaVersion = 1;
+    // 2: added FollowUps. A v1 entry has no idea whether its post continued, and serving half a
+    // thread is worse than re-extracting it, so the reader drops them.
+    public const int CurrentSchemaVersion = 2;
 }
+
+/// <summary>One chained part of a cached post: its text and its own stored media files.</summary>
+internal sealed record CachedSegment(string? Text, IReadOnlyList<CachedMediaItem> Items);

@@ -54,6 +54,33 @@ public class ThreadsPostExtractorTests
     }
 
     [Fact]
+    public async Task ExtractAsync_ChainedPost_CarriesEveryPartAsAFollowUp()
+    {
+        var sut = CreateSut(Serving(Fixture("chained-post.html")));
+
+        var result = await sut.ExtractAsync(Post("DbChainRoot"), CancellationToken.None);
+
+        var payload = Ok(result);
+        payload.Items.Should().ContainSingle().Which.Kind.Should().Be(MediaKind.Video);
+        payload.FollowUps.Select(s => s.Text).Should()
+            .Equal("part two", "part three, with a picture", "part four");
+        payload.FollowUps[1].Items.Should().ContainSingle();
+        Cleanup(payload);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_PostWithoutAChain_HasNoFollowUps()
+    {
+        var sut = CreateSut(Serving(Fixture("video-post.html")));
+
+        var result = await sut.ExtractAsync(Post("DbnWztIiMQa"), CancellationToken.None);
+
+        var payload = Ok(result);
+        payload.FollowUps.Should().BeEmpty();
+        Cleanup(payload);
+    }
+
+    [Fact]
     public async Task ExtractAsync_ShareShortlink_ReadsThePostTheRedirectLandedOn()
     {
         // The shortlink names no post; only the redirected URL does.
@@ -219,7 +246,8 @@ public class ThreadsPostExtractorTests
 
     private static void Cleanup(MediaPayload payload)
     {
-        foreach (var item in payload.Items)
+        var files = payload.Items.Concat(payload.FollowUps.SelectMany(segment => segment.Items));
+        foreach (var item in files)
         {
             if (File.Exists(item.FilePath))
             {

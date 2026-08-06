@@ -23,6 +23,9 @@ internal sealed class ThreadsPostExtractor : IPlatformExtractor
     // Telegram albums top out at 10; a Threads carousel holds up to 20.
     private const int MaxAlbumItems = 10;
 
+    // A "1/8" thread is already long for a chat; past that the repost stops being a courtesy.
+    private const int MaxContinuationParts = 10;
+
     private static readonly string BrowserUserAgent =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
         "Chrome/120.0.0.0 Safari/537.36";
@@ -104,7 +107,7 @@ internal sealed class ThreadsPostExtractor : IPlatformExtractor
                 return Result<MediaPayload, ExtractionError>.Failure(new ExtractionError.UnsupportedPlatform(url));
             }
 
-            var items = await DownloadAllAsync(post, cancellationToken);
+            var items = await DownloadAllAsync(post.Media, cancellationToken);
             if (items.Count == 0)
             {
                 _logger.LogWarning(
@@ -112,8 +115,18 @@ internal sealed class ThreadsPostExtractor : IPlatformExtractor
                 return Result<MediaPayload, ExtractionError>.Failure(new ExtractionError.UnsupportedPlatform(url));
             }
 
+            var followUps = await DownloadContinuationAsync(post, cancellationToken);
+            if (followUps.Count > 0)
+            {
+                _logger.LogInformation(
+                    "Threads post {Url} continues in {Count} more part(s)", url, followUps.Count);
+            }
+
             return Result<MediaPayload, ExtractionError>.Success(
-                new MediaPayload(url, Title: null, Author: post.Author, Items: items, Description: post.Caption));
+                new MediaPayload(url, Title: null, Author: post.Author, Items: items, Description: post.Caption)
+                {
+                    FollowUps = followUps,
+                });
         }
         catch (HttpRequestException ex)
         {
@@ -187,18 +200,20 @@ internal sealed class ThreadsPostExtractor : IPlatformExtractor
         return (finalUrl, await response.Content.ReadAsStringAsync(cancellationToken));
     }
 
-    private async Task<List<MediaItem>> DownloadAllAsync(ThreadsPost post, CancellationToken cancellationToken)
+    private async Task<List<MediaItem>> DownloadAllAsync(
+        IReadOnlyList<ThreadsMediaSource> sources,
+        CancellationToken cancellationToken)
     {
         var maxBytes = (long)_options.MaxFileSizeMb * 1024 * 1024;
         var client = _httpClientFactory.CreateClient(nameof(ThreadsPostExtractor));
-        var items = new List<MediaItem>(post.Media.Count);
+        var items = new List<MediaItem>(sources.Count);
 
-        foreach (var source in post.Media)
+        foreach (var source in sources)
         {
             if (items.Count >= MaxAlbumItems)
             {
                 _logger.LogInformation(
-                    "Threads post carries {Total} media; sending the first {Sent}", post.Media.Count, MaxAlbumItems);
+                    "Threads post carries {Total} media; sending the first {Sent}", sources.Count, MaxAlbumItems);
                 break;
             }
 
@@ -210,6 +225,41 @@ internal sealed class ThreadsPostExtractor : IPlatformExtractor
         }
 
         return items;
+    }
+
+    /// <summary>
+    /// Turns the author's chained parts into segments the sender can post after the main reply. A
+    /// part whose media won't download still ships its text — losing the words because a photo 404'd
+    /// would be the worse trade.
+    /// </summary>
+    private async Task<List<PostSegment>> DownloadContinuationAsync(
+        ThreadsPost post,
+        CancellationToken cancellationToken)
+    {
+        var segments = new List<PostSegment>();
+
+        foreach (var part in post.Continuation)
+        {
+            if (segments.Count >= MaxContinuationParts)
+            {
+                _logger.LogInformation(
+                    "Threads chain has {Total} parts; keeping the first {Kept}",
+                    post.Continuation.Count, MaxContinuationParts);
+                break;
+            }
+
+            var items = part.Media.Count > 0
+                ? await DownloadAllAsync(part.Media, cancellationToken)
+                : [];
+
+            var segment = new PostSegment(part.Text, items);
+            if (segment.HasContent)
+            {
+                segments.Add(segment);
+            }
+        }
+
+        return segments;
     }
 
     private async Task<MediaItem?> DownloadAsync(
