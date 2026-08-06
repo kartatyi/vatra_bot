@@ -19,6 +19,13 @@ Quality bar: **code you'd put on a CV.** Every rule below earns its place by kee
 - **"Done" means `dotnet test` is green** — not that it builds. Run it before you claim done.
 - Never `--no-verify`, never `--force`, never `--amend` a pushed commit — unless asked in this same turn.
 - **No AI attribution, ever** — no `Co-Authored-By: Claude`, no `Generated with…`. The committer is the human. (Stated once; here is canonical.)
+- **Everything published is in English** — commit message, PR *title and body*, code, comments, docs, ADRs, log templates, issue replies. The chat is a separate channel: whatever language it runs in, that language stops at the repo boundary. (Stated once; here is canonical.)
+
+```
+## What / Adds the read side to the durable repost journal.   good — the chat was Ukrainian; the PR is not
+## Що це / Додає read-side до журналу репостів.               bad  — PR #17 shipped like this
+```
+
 - No token, bot handle, group name, or operator identity in any committed file → [Secrets](#secrets--config).
 - Requirement ambiguous in a way that changes the design? Ask before coding. Mirror the user's pace: asked for rules → write rules, don't sprint to implementation.
 
@@ -198,4 +205,4 @@ Write an ADR for any decision that's hard to reverse or surprising to a newcomer
 
 ---
 
-*Last revised: 2026-06-28.*
+*Last revised: 2026-08-06.*
