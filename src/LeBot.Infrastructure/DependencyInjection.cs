@@ -1,4 +1,5 @@
 using LeBot.Application.Ports;
+using LeBot.Application.Telemetry;
 using LeBot.Infrastructure.Configuration;
 using LeBot.Infrastructure.Diagnostics;
 using LeBot.Infrastructure.Maintenance;
@@ -8,9 +9,12 @@ using LeBot.Infrastructure.MediaExtraction.Instagram;
 using LeBot.Infrastructure.MediaExtraction.Threads;
 using LeBot.Infrastructure.MediaExtraction.ThreadsEmbed;
 using LeBot.Infrastructure.MediaExtraction.YtDlp;
+using LeBot.Infrastructure.Persistence;
 using LeBot.Infrastructure.Releases;
 using LeBot.Infrastructure.Telegram;
 using LeBot.Infrastructure.Text;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -33,9 +37,28 @@ public static class DependencyInjection
         services.Configure<UpdateOptions>(configuration.GetSection(UpdateOptions.SectionName));
         services.Configure<ThreadsOptions>(configuration.GetSection(ThreadsOptions.SectionName));
         services.Configure<MediaCacheOptions>(configuration.GetSection(MediaCacheOptions.SectionName));
+        services.Configure<TelemetryOptions>(configuration.GetSection(TelemetryOptions.SectionName));
 
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IHostAccountInfo, HostAccountInfo>();
+
+        // Durable repost journal (the dashboard's data store). A context factory — not a scoped
+        // context — because the singleton store creates a short-lived context per write. The SQLite
+        // file is pinned beside the executable via TelemetryOptions.ResolvedDatabasePath.
+        services.AddDbContextFactory<LeBotDbContext>((sp, dbOptions) =>
+        {
+            var telemetry = sp.GetRequiredService<IOptions<TelemetryOptions>>().Value;
+            // DefaultTimeout governs how long a command waits on a busy lock before giving up. Together
+            // with WAL (enabled once at startup by RepostDatabaseInitializer) it lets the future
+            // dashboard reader and the bot's writer overlap briefly instead of failing with SQLITE_BUSY.
+            var connectionString = new SqliteConnectionStringBuilder
+            {
+                DataSource = telemetry.ResolvedDatabasePath,
+                DefaultTimeout = 30,
+            }.ToString();
+            dbOptions.UseSqlite(connectionString);
+        });
+        services.AddSingleton<IRepostEventStore, SqliteRepostEventStore>();
 
         services.AddSingleton<ITelegramBotClient>(sp =>
         {
@@ -93,11 +116,40 @@ public static class DependencyInjection
         // before any polling noise, so the very top of the log answers "what is this process doing?".
         services.AddHostedService<StartupConfigLogger>();
 
+        // Migrate the telemetry database before the poll loop starts, so the first repost has somewhere
+        // to record itself.
+        services.AddHostedService<RepostDatabaseInitializer>();
+
         services.AddHostedService<TelegramUpdateDispatcher>();
         services.AddHostedService<DownloadsCleanupService>();
         services.AddHostedService<MediaCacheCleanupService>();
         services.AddHostedService<YtDlpUpdateService>();
         services.AddHostedService<SelfUpdateService>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers a <b>read-only</b> view over the repost journal — exactly what the local HTML dashboard
+    /// needs and nothing else (no Telegram client, no extractors, no hosted services), so the dashboard
+    /// stays a clean reader rather than dragging in the whole bot. The SQLite file is opened in read-only
+    /// mode so the dashboard process can never mutate the bot's telemetry; WAL (enabled by the bot) lets it
+    /// read live alongside the running bot's writes. Mirrors the writer's connection settings otherwise.
+    /// </summary>
+    /// <param name="resolvedDatabasePath">Absolute path to the same SQLite file the bot writes.</param>
+    public static IServiceCollection AddRepostJournalReader(this IServiceCollection services, string resolvedDatabasePath)
+    {
+        services.AddDbContextFactory<LeBotDbContext>(dbOptions =>
+        {
+            var connectionString = new SqliteConnectionStringBuilder
+            {
+                DataSource = resolvedDatabasePath,
+                Mode = SqliteOpenMode.ReadOnly,
+                DefaultTimeout = 30,
+            }.ToString();
+            dbOptions.UseSqlite(connectionString);
+        });
+        services.AddSingleton<IRepostEventStore, SqliteRepostEventStore>();
 
         return services;
     }

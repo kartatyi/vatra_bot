@@ -16,6 +16,7 @@ A Telegram group bot that re-posts the actual video / photo content from TikTok,
 - When a link is supported but media extraction fails, the bot falls back to the post's title/description as a text reply; when even that's empty, it stays silent rather than posting a "couldn't extract" notice.
 - Polly retries transient Telegram failures (429, 5xx) with exponential backoff + jitter; permanent failures (400, 403) fall through to a source-URL text reply.
 - Caches every repost on disk for 24 hours, keyed by the link stripped of its share-tracking noise. Post the same clip again — or someone else's share link to it — and the reply comes straight off disk: no download, no yt-dlp, no request to the platform. See [`docs/decisions/0007-media-cache.md`](docs/decisions/0007-media-cache.md).
+- Journals every processed link to a durable SQLite store, surfaced two ways: the `/stats`, `/failures`, and `/top` Telegram commands, and a local read-only HTML dashboard reached over an SSH tunnel (see [`docs/decisions/0004`](docs/decisions/0004-repost-journal-persistence.md) and [`0005`](docs/decisions/0005-local-html-dashboard.md)).
 
 ## Why
 
@@ -32,6 +33,7 @@ In a group chat, every external link is a context switch — open the app, watch
   - [x] 24-hour on-disk media cache — a repeat link is served without touching the platform
   - [x] CI on GitHub Actions: format gate, build, test, per-layer coverage gate
   - [x] Self-update from GitHub Releases — SHA256-verified atomic swap with health-gated rollback and operator DM (activates once the first tagged release is published — see [`docs/decisions/0002-self-update.md`](docs/decisions/0002-self-update.md))
+  - [x] Observability: durable SQLite repost journal + `/stats` `/failures` `/top` commands + a local read-only HTML dashboard ([`0004`](docs/decisions/0004-repost-journal-persistence.md), [`0005`](docs/decisions/0005-local-html-dashboard.md))
 - [ ] **Phase 2.** Conversational layer.
   - [ ] Per-user dossier storage (EF Core + SQLite -> PostgreSQL)
   - [ ] LLM-backed reply pipeline (provider TBD — see [`docs/decisions/0001-phase2-llm-provider.md`](docs/decisions/0001-phase2-llm-provider.md))

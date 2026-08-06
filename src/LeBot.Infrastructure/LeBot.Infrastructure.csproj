@@ -30,6 +30,16 @@
     <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
     <PackageReference Include="Polly" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <!-- Pulled in directly only to force the patched SQLitePCLRaw bundle over EF Core's vulnerable
+         transitive 2.1.11 (see Directory.Packages.props). -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
+    <!-- Design-time only: powers `dotnet ef migrations`. PrivateAssets keeps it out of the Host's
+         published output, where nothing needs it at runtime. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
   </ItemGroup>
 
 </Project>

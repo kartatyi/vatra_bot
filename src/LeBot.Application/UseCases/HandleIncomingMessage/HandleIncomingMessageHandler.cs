@@ -1,5 +1,6 @@
 using LeBot.Application.Metrics;
 using LeBot.Application.Ports;
+using LeBot.Application.Telemetry;
 using LeBot.Domain.Common;
 using LeBot.Domain.Media;
 using Microsoft.Extensions.Logging;
@@ -17,6 +18,8 @@ public sealed class HandleIncomingMessageHandler(
     IMediaCache cache,
     ITelegramMessenger messenger,
     RepostMetrics metrics,
+    IRepostJournal journal,
+    TimeProvider timeProvider,
     ILogger<HandleIncomingMessageHandler> logger)
 {
     public async Task HandleAsync(IncomingMessage message, CancellationToken cancellationToken)
@@ -39,6 +42,8 @@ public sealed class HandleIncomingMessageHandler(
         var candidates = extractors.Where(e => e.CanHandle(url)).ToList();
         if (candidates.Count == 0)
         {
+            // Not even a candidate — the common case for bare github / news / blog links. The journal
+            // skips it on purpose: recording every non-media URL would bury the signal in noise.
             logger.LogDebug("No extractor for URL {Url}", url);
             return;
         }
@@ -47,6 +52,9 @@ public sealed class HandleIncomingMessageHandler(
         // method so the user has immediate feedback while extraction + upload run. The
         // indicator is cancelled when ProcessUrlAsync returns (success, failure, or fallback).
         await using var busy = messenger.IndicateBusy(message.ChatId, BusyKind.UploadingVideo);
+
+        // Monotonic start stamp; every journalled event records wall-clock time up to its terminal state.
+        var startedAt = timeProvider.GetTimestamp();
 
         // Ask the cache before any extractor runs: a link the chat has already seen is answered
         // from disk without a single request to the platform.
@@ -76,6 +84,9 @@ public sealed class HandleIncomingMessageHandler(
                         ok.Value,
                         cancellationToken);
                     metrics.RecordMediaRepost(extractorName);
+                    await journal.RecordMediaRepostAsync(
+                        url, extractorName, ok.Value.Items.Count, TotalBytes(ok.Value),
+                        timeProvider.GetElapsedTime(startedAt), message.ChatId, cancellationToken);
                     logger.LogInformation(
                         "Reposted {Count} media item(s) from {Url} via {Extractor} into chat {ChatId}",
                         ok.Value.Items.Count, url, extractorName, message.ChatId);
@@ -88,7 +99,7 @@ public sealed class HandleIncomingMessageHandler(
 
                 case Result<MediaPayload, ExtractionError>.Err err when err.Error is ExtractionError.UnsupportedPlatform:
                     // This extractor doesn't claim the URL; treat it as if CanHandle had returned
-                    // false. Silent skip — no ack, no warning.
+                    // false. Silent skip — no ack, no warning, no journal row.
                     logger.LogDebug(
                         "{Extractor} marked {Url} as unsupported", extractorName, url);
                     break;
@@ -98,11 +109,17 @@ public sealed class HandleIncomingMessageHandler(
                         "{Extractor} failed for {Url}: {Reason}",
                         extractorName, url, err.Error.Reason);
                     metrics.RecordFailure(extractorName);
+                    await journal.RecordFailureAsync(
+                        url, extractorName, err.Error,
+                        timeProvider.GetElapsedTime(startedAt), message.ChatId, cancellationToken);
                     sawSubstantiveAttempt = true;
                     break;
 
                 case Result<MediaPayload, ExtractionError>.Ok:
-                    // Extractor returned nothing usable; try the next candidate.
+                    // Extractor claimed the URL but returned an empty payload; record it and try the next.
+                    await journal.RecordNothingExtractedAsync(
+                        url, extractorName,
+                        timeProvider.GetElapsedTime(startedAt), message.ChatId, cancellationToken);
                     sawSubstantiveAttempt = true;
                     break;
             }
@@ -117,6 +134,9 @@ public sealed class HandleIncomingMessageHandler(
                 fallback.Payload,
                 cancellationToken);
             metrics.RecordTextRepost(fallback.Extractor);
+            await journal.RecordTextFallbackAsync(
+                url, fallback.Extractor,
+                timeProvider.GetElapsedTime(startedAt), message.ChatId, cancellationToken);
             logger.LogInformation(
                 "Reposted text body from {Url} into chat {ChatId}",
                 url, message.ChatId);
@@ -125,18 +145,20 @@ public sealed class HandleIncomingMessageHandler(
 
         if (!sawSubstantiveAttempt)
         {
-            // Every extractor declined the URL — bare http link to a non-media site, basically.
-            // Stay silent so the chat isn't flooded with noise for github / news / blog URLs
-            // that nobody wanted reposted in the first place.
+            // Every candidate returned UnsupportedPlatform — claimed the host pattern but disowned this
+            // specific URL. Stay silent so the chat isn't flooded with noise, but journal it: a platform
+            // that suddenly stops claiming its own URLs is exactly the kind of breakage the dashboard
+            // should surface.
             metrics.RecordSilentSkip();
+            await journal.RecordNoExtractorAsync(
+                url, timeProvider.GetElapsedTime(startedAt), message.ChatId, cancellationToken);
             logger.LogDebug("No extractor claimed {Url} — silent skip", url);
             return;
         }
 
-        // An extractor claimed the URL but produced neither media nor a text fallback. Stay
-        // silent rather than posting a "couldn't extract" notice — a failed extraction shouldn't
-        // add chat noise. The reason was already surfaced in the loop above (a warning for hard
-        // failures, debug otherwise).
+        // An extractor claimed the URL but produced neither media nor a text fallback. Stay silent
+        // rather than posting a "couldn't extract" notice — the per-extractor outcome (a Failure or
+        // NothingExtracted row) was already journalled in the loop above.
         logger.LogDebug("Nothing extractable from {Url} — staying silent", url);
     }
 
@@ -190,5 +212,25 @@ public sealed class HandleIncomingMessageHandler(
     {
         return !string.IsNullOrWhiteSpace(payload.Description)
             || !string.IsNullOrWhiteSpace(payload.Title);
+    }
+
+    /// <summary>
+    /// Total bytes across all media items, or null when any item's size is unknown — recording a
+    /// partial sum as if it were the whole would skew the dashboard's bandwidth figures.
+    /// </summary>
+    private static long? TotalBytes(MediaPayload payload)
+    {
+        long total = 0;
+        foreach (var item in payload.Items)
+        {
+            if (item.SizeBytes is not { } size)
+            {
+                return null;
+            }
+
+            total += size;
+        }
+
+        return total;
     }
 }
