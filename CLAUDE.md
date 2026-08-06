@@ -14,7 +14,7 @@ Quality bar: **code you'd put on a CV.** Every rule below earns its place by kee
 
 ## Agent contract — read first
 
-- Branch + PR. **Never push to `main`.** Branch names: `feat|fix|chore|docs/<kebab>`.
+- Branch + PR. **Never push to `main`, never merge your own PR** → [Git](#git--commits-branches-prs). Branch names: `feat|fix|chore|docs/<kebab>`.
 - One logical change per commit; stop at a coherent unit, don't snowball.
 - **"Done" means `dotnet test` is green** — not that it builds. Run it before you claim done.
 - Never `--no-verify`, never `--force`, never `--amend` a pushed commit — unless asked in this same turn.
@@ -157,8 +157,10 @@ Closes #14
 fix(tg-client): retry SendVideo on 429 using server-advised delay
 ```
 
-- Squash-merge to `main`; the squash subject is itself a Conventional Commit. Delete the branch after.
+- **The agent opens the PR; the operator merges it.** Push the branch, open the PR, report the CI result — then stop and hand over the link. Squash-merge to `main` is the operator's click, always. This repo has never used formal review — `reviewDecision` is empty on every PR merged to date — so that click is the only gate between a branch and `main`, and it belongs to a human.
+- The squash subject is itself a Conventional Commit. Delete the branch after.
 - One PR = one logical change. Can't say it in a sentence? Split it. Open it early — draft is fine. Template: [`.github/pull_request_template.md`](.github/pull_request_template.md).
+- Branch off `main`, not off another branch. A PR stacked on an unmerged PR strands the whole stack when the base is retargeted or squashed — that is how #13–#15 ended up merged into their base instead of `main`, and #17 exists only to undo it.
 - Beyond the [Agent contract](#agent-contract--read-first): never mix concerns in one commit.
 
 ## Secrets & config
