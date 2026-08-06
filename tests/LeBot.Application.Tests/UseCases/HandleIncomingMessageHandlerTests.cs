@@ -307,6 +307,43 @@ public class HandleIncomingMessageHandlerTests
     }
 
     [Fact]
+    public async Task HandleAsync_CachedMediaServed_JournalsItUnderTheCacheName()
+    {
+        var url = new Uri("https://tiktok.com/@user/video/1");
+        var item = new MediaItem("/cache/ab/00.mp4", MediaKind.Video, "video/mp4", 100, 5);
+        var stored = new MediaPayload(url, null, "user", [item], "body", RetainFiles: true);
+
+        _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
+        _extractor.CanHandle(url).Returns(true);
+        _cache.TryGetAsync(url, Arg.Any<CancellationToken>())
+            .Returns(new CachedRepost(stored, "YtDlpPlatformExtractor"));
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        // A served link is a repost the dashboard must count, or the failure rate reads high
+        // for no reason. It is filed under MediaCache, not the extractor that never ran.
+        await _journal.Received(1).RecordMediaRepostAsync(
+            url, "MediaCache", 1, 100, Arg.Any<TimeSpan>(), 123L, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleAsync_CachedTextServed_JournalsItUnderTheCacheName()
+    {
+        var url = new Uri("https://threads.com/@user/post/1");
+        var stored = new MediaPayload(url, null, "user", [], "post body", RetainFiles: true);
+
+        _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
+        _extractor.CanHandle(url).Returns(true);
+        _cache.TryGetAsync(url, Arg.Any<CancellationToken>())
+            .Returns(new CachedRepost(stored, "ThreadsEmbedExtractor"));
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        await _journal.Received(1).RecordTextFallbackAsync(
+            url, "MediaCache", Arg.Any<TimeSpan>(), 123L, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task HandleAsync_CachedPayloadHasNothingToSay_FallsBackToExtraction()
     {
         var url = new Uri("https://example.com/x");

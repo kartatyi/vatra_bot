@@ -22,6 +22,14 @@ public sealed class HandleIncomingMessageHandler(
     TimeProvider timeProvider,
     ILogger<HandleIncomingMessageHandler> logger)
 {
+    /// <summary>
+    /// Extractor label journalled for a cache hit. Deliberately not the extractor that originally
+    /// produced the payload: the per-extractor reliability table exists to answer "is this extractor
+    /// still working", and a disk read says nothing about that. Crediting the original would inflate
+    /// its success count with runs that never happened.
+    /// </summary>
+    private const string CacheExtractorName = "MediaCache";
+
     public async Task HandleAsync(IncomingMessage message, CancellationToken cancellationToken)
     {
         var urls = urlExtractor.Extract(message.Text);
@@ -58,7 +66,7 @@ public sealed class HandleIncomingMessageHandler(
 
         // Ask the cache before any extractor runs: a link the chat has already seen is answered
         // from disk without a single request to the platform.
-        if (await TryServeFromCacheAsync(message, url, cancellationToken))
+        if (await TryServeFromCacheAsync(message, url, startedAt, cancellationToken))
         {
             return;
         }
@@ -170,6 +178,7 @@ public sealed class HandleIncomingMessageHandler(
     private async Task<bool> TryServeFromCacheAsync(
         IncomingMessage message,
         Uri url,
+        long startedAt,
         CancellationToken cancellationToken)
     {
         var cached = await cache.TryGetAsync(url, cancellationToken);
@@ -186,6 +195,9 @@ public sealed class HandleIncomingMessageHandler(
                 cached.Payload,
                 cancellationToken);
             metrics.RecordMediaRepost(cached.Extractor);
+            await journal.RecordMediaRepostAsync(
+                url, CacheExtractorName, cached.Payload.Items.Count, TotalBytes(cached.Payload),
+                timeProvider.GetElapsedTime(startedAt), message.ChatId, cancellationToken);
         }
         else if (HasReplyableText(cached.Payload))
         {
@@ -195,6 +207,9 @@ public sealed class HandleIncomingMessageHandler(
                 cached.Payload,
                 cancellationToken);
             metrics.RecordTextRepost(cached.Extractor);
+            await journal.RecordTextFallbackAsync(
+                url, CacheExtractorName,
+                timeProvider.GetElapsedTime(startedAt), message.ChatId, cancellationToken);
         }
         else
         {
