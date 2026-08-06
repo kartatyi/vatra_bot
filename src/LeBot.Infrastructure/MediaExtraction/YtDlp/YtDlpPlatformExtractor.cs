@@ -257,11 +257,12 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
                 ShouldHandle = new PredicateBuilder<RunResult<T>>()
                     .HandleResult(r => !r.Success && YtDlpErrorClassifier.IsTransientChallengeFailure(JoinErrors(r.ErrorOutput))),
                 // Measured ~50% success per attempt against a challenged TikTok URL (yt-dlp
-                // 2026.07.04), and attempts look independent — so 6 total tries lands around 98%.
-                // Metadata fetch and download each roll the challenge separately, which compounds
-                // to ~97% end-to-end. Each attempt spawns a yt-dlp process costing ~4s, capping
-                // the worst case near 30s per stage.
-                MaxRetryAttempts = 5,
+                // 2026.07.04), and attempts look independent — so 10 total tries lands around
+                // 99.9%. Metadata fetch and download each roll the challenge separately, which
+                // compounds to ~99.8% end-to-end. Raising the cap is nearly free: the expected
+                // attempt count stays 2, so a typical link still lands in seconds — the cap only
+                // bounds the tail, at ~4s per attempt.
+                MaxRetryAttempts = 9,
                 BackoffType = DelayBackoffType.Constant,
                 Delay = TimeSpan.FromMilliseconds(500),
                 UseJitter = true,
