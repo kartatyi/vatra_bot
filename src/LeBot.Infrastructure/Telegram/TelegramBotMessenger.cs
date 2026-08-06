@@ -174,7 +174,7 @@ public sealed class TelegramBotMessenger(
                 IAlbumInputMedia media = item.Kind switch
                 {
                     MediaKind.Photo => new InputMediaPhoto(inputFile) { Caption = itemCaption },
-                    MediaKind.Video => new InputMediaVideo(inputFile) { Caption = itemCaption },
+                    MediaKind.Video => new InputMediaVideo(inputFile) { Caption = itemCaption, SupportsStreaming = true },
                     _ => new InputMediaDocument(inputFile) { Caption = itemCaption },
                 };
                 album.Add(media);
@@ -227,10 +227,16 @@ public sealed class TelegramBotMessenger(
         switch (item.Kind)
         {
             case MediaKind.Video:
+                // supportsStreaming makes Telegram prepare the upload for progressive playback
+                // (moov atom up front) and render the inline player with a play button — without
+                // it a non-faststart MP4 falls back to a generic file with a download button.
+                // duration is the one dimension we have; width/height Telegram reads from the bytes.
                 await SendWithRetryAsync(ct => bot.SendVideo(
                     chatId: chatId,
                     video: inputFile,
+                    duration: item.DurationSeconds,
                     caption: caption,
+                    supportsStreaming: true,
                     replyParameters: reply,
                     cancellationToken: ct), cancellationToken);
                 break;
