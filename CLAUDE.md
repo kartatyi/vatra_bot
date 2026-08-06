@@ -179,7 +179,7 @@ Cache knobs ([`MediaCacheOptions`](src/LeBot.Infrastructure/Configuration/MediaC
   "Enabled": true,        // false → every link extracted fresh, as before the cache existed
   "Directory": "cache",   // beside the exe; keep it off DownloadDirectory, whose sweep empties hourly
   "TtlHours": 24,         // from write, never slides on access — an edited post can repost stale until then
-  "MaxTotalSizeMb": 2048  // over the cap, oldest entries are evicted first
+  "MaxTotalSizeMb": 4096  // over the cap, oldest entries are evicted first
 }
 ```
 

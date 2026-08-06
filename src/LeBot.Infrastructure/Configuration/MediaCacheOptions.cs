@@ -29,7 +29,7 @@ public sealed class MediaCacheOptions
     /// Ceiling on the whole cache. Once crossed, the oldest entries are evicted until it fits again,
     /// so a busy chat can't fill the disk before the entries age out on their own.
     /// </summary>
-    public int MaxTotalSizeMb { get; init; } = 2048;
+    public int MaxTotalSizeMb { get; init; } = 4096;
 
     /// <summary>
     /// <see cref="Directory"/> as an absolute path. A relative value is rebased onto the executable's
