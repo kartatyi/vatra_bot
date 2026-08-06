@@ -1,3 +1,4 @@
+using System.Text;
 using LeBot.Application.Ports;
 using LeBot.Domain.Media;
 using Microsoft.Extensions.Logging;
@@ -72,6 +73,8 @@ public sealed class TelegramBotMessenger(
         {
             await SendAlbumAsync(chatId, reply, payload.Items, caption, payload, cancellationToken);
         }
+
+        await SendFollowUpsAsync(chatId, reply, payload, cancellationToken);
     }
 
     public async Task ReplyWithTextAsync(
@@ -81,16 +84,18 @@ public sealed class TelegramBotMessenger(
         CancellationToken cancellationToken)
     {
         var body = BuildBody(payload, MaxTextLength);
-        if (string.IsNullOrEmpty(body))
+        var reply = new ReplyParameters { MessageId = replyToMessageId };
+
+        if (!string.IsNullOrEmpty(body))
         {
-            return;
+            await SendWithRetryAsync(ct => bot.SendMessage(
+                chatId: chatId,
+                text: body,
+                replyParameters: reply,
+                cancellationToken: ct), cancellationToken);
         }
 
-        await SendWithRetryAsync(ct => bot.SendMessage(
-            chatId: chatId,
-            text: body,
-            replyParameters: new ReplyParameters { MessageId = replyToMessageId },
-            cancellationToken: ct), cancellationToken);
+        await SendFollowUpsAsync(chatId, reply, payload, cancellationToken);
     }
 
     public async Task SendTextAsync(long chatId, string text, CancellationToken cancellationToken)
@@ -117,6 +122,100 @@ public sealed class TelegramBotMessenger(
             _ => ChatAction.UploadVideo,
         };
         return new TelegramBusyIndicator(bot, chatId, action, logger);
+    }
+
+    /// <summary>
+    /// Posts the rest of a chained post after the main reply. Consecutive text-only parts travel as
+    /// one message — a "1/6" thread would otherwise land as six pings — while a part with its own
+    /// media has to be its own message, so it breaks the run and the text resumes after it.
+    /// </summary>
+    private async Task SendFollowUpsAsync(
+        long chatId,
+        ReplyParameters reply,
+        MediaPayload payload,
+        CancellationToken cancellationToken)
+    {
+        var pending = new List<string>();
+
+        foreach (var segment in payload.FollowUps)
+        {
+            if (segment.Items.Count == 0)
+            {
+                if (!string.IsNullOrWhiteSpace(segment.Text))
+                {
+                    pending.Add(segment.Text.Trim());
+                }
+
+                continue;
+            }
+
+            await FlushTextAsync(chatId, reply, pending, cancellationToken);
+
+            var caption = Truncate(segment.Text?.Trim(), MaxCaptionLength);
+            if (segment.Items.Count == 1)
+            {
+                await SendSingleAsync(chatId, reply, segment.Items[0], caption, payload, cancellationToken);
+            }
+            else
+            {
+                await SendAlbumAsync(chatId, reply, segment.Items, caption, payload, cancellationToken);
+            }
+        }
+
+        await FlushTextAsync(chatId, reply, pending, cancellationToken);
+    }
+
+    /// <summary>
+    /// Sends the parts collected so far as one message, opening a new one whenever the next part
+    /// wouldn't fit. Splitting between parts rather than mid-sentence is the whole point.
+    /// </summary>
+    private async Task FlushTextAsync(
+        long chatId,
+        ReplyParameters reply,
+        List<string> parts,
+        CancellationToken cancellationToken)
+    {
+        if (parts.Count == 0)
+        {
+            return;
+        }
+
+        var batch = new StringBuilder();
+        foreach (var part in parts)
+        {
+            var addition = batch.Length == 0 ? part : "\n\n" + part;
+            if (batch.Length > 0 && batch.Length + addition.Length > MaxTextLength)
+            {
+                await SendPlainTextAsync(chatId, reply, batch.ToString(), cancellationToken);
+                batch.Clear();
+                batch.Append(part);
+                continue;
+            }
+
+            batch.Append(addition);
+        }
+
+        await SendPlainTextAsync(chatId, reply, batch.ToString(), cancellationToken);
+        parts.Clear();
+    }
+
+    private async Task SendPlainTextAsync(
+        long chatId,
+        ReplyParameters reply,
+        string text,
+        CancellationToken cancellationToken)
+    {
+        var body = Truncate(text, MaxTextLength);
+        if (string.IsNullOrEmpty(body))
+        {
+            return;
+        }
+
+        await SendWithRetryAsync(ct => bot.SendMessage(
+            chatId: chatId,
+            text: body,
+            replyParameters: reply,
+            cancellationToken: ct), cancellationToken);
     }
 
     private async Task SendSingleAsync(
@@ -329,13 +428,13 @@ public sealed class TelegramBotMessenger(
             _ => null,
         };
 
-        if (body is null)
-        {
-            return null;
-        }
-
-        return body.Length > maxLength
-            ? body[..(maxLength - 1)] + "…"
-            : body;
+        return Truncate(body, maxLength);
     }
+
+    private static string? Truncate(string? text, int maxLength) => text switch
+    {
+        null or "" => text,
+        _ when text.Length > maxLength => text[..(maxLength - 1)] + "…",
+        _ => text,
+    };
 }

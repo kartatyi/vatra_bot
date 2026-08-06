@@ -1,0 +1,35 @@
+<!doctype html>
+<!--
+  A post the author wrote as a chain, with the page's real conversation layout:
+
+    edge 0  author       reply_to —        the linked post (video)
+    edge 1  author       reply_to author   the continuation, 3 parts (part 2 carries a photo)
+    edge 2  a stranger   reply_to author   a comment
+    edge 3  a stranger   reply_to author   another comment…
+            author       reply_to stranger …and the author answering it — NOT part of the thread
+
+  Everything from edge 2 on must stay out of the chat.
+-->
+<html lang="en">
+<head>
+<meta property="og:image" content="https://scontent.test/social-card.jpg" />
+<script type="application/json" data-sjs>{"require":[["ScheduledServerJS","handle",null,[{"__bbox":{"result":{"data":{"data":{"edges":[
+{"node":{"thread_type":"thread","thread_items":[
+  {"post":{"pk":"1","code":"DbChainRoot","user":{"username":"whyspeculate"},"caption":{"text":"part one, with the clip"},"media_type":2,"video_versions":[{"type":101,"url":"https://cdn.test/root-clip.mp4"}],"text_post_app_info":{"is_reply":false,"reply_to_author":null}}}
+]}},
+{"node":{"thread_type":"thread","thread_items":[
+  {"post":{"pk":"2","code":"DbChainPart2","user":{"username":"whyspeculate"},"caption":{"text":"part two"},"media_type":19,"text_post_app_info":{"is_reply":true,"reply_to_author":{"username":"whyspeculate"}}}},
+  {"post":{"pk":"3","code":"DbChainPart3","user":{"username":"whyspeculate"},"caption":{"text":"part three, with a picture"},"media_type":1,"image_versions2":{"candidates":[{"width":1080,"height":1350,"url":"https://cdn.test/part3.jpg"}]},"text_post_app_info":{"is_reply":true,"reply_to_author":{"username":"whyspeculate"}}}},
+  {"post":{"pk":"4","code":"DbChainPart4","user":{"username":"whyspeculate"},"caption":{"text":"part four"},"media_type":19,"text_post_app_info":{"is_reply":true,"reply_to_author":{"username":"whyspeculate"}}}}
+]}},
+{"node":{"thread_type":"thread","thread_items":[
+  {"post":{"pk":"5","code":"DbComment001","user":{"username":"someone.else"},"caption":{"text":"a comment from the peanut gallery"},"media_type":19,"text_post_app_info":{"is_reply":true,"reply_to_author":{"username":"whyspeculate"}}}}
+]}},
+{"node":{"thread_type":"thread","thread_items":[
+  {"post":{"pk":"6","code":"DbComment002","user":{"username":"third.party"},"caption":{"text":"another comment"},"media_type":19,"text_post_app_info":{"is_reply":true,"reply_to_author":{"username":"whyspeculate"}}}},
+  {"post":{"pk":"7","code":"DbAuthorReply","user":{"username":"whyspeculate"},"caption":{"text":"the author answering a commenter"},"media_type":19,"text_post_app_info":{"is_reply":true,"reply_to_author":{"username":"third.party"}}}}
+]}}
+]}}}}}]]]}</script>
+</head>
+<body><div id="barcelona-shell"></div></body>
+</html>

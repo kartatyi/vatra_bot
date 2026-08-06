@@ -25,4 +25,12 @@ public sealed record MediaPayload(
 {
     /// <summary>True when the payload contains at least one media item.</summary>
     public bool HasMedia => Items.Count > 0;
+
+    /// <summary>
+    /// The rest of the post when its author wrote it as a chain — the parts that follow the one the
+    /// link points at, in order. Empty for the ordinary single-message post. These are *not* folded
+    /// into <see cref="Items"/> and <see cref="Description"/>: each part is its own message on the
+    /// platform, and the sender decides how to group them.
+    /// </summary>
+    public IReadOnlyList<PostSegment> FollowUps { get; init; } = [];
 }

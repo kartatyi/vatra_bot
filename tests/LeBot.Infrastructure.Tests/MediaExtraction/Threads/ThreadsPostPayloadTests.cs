@@ -83,6 +83,45 @@ public class ThreadsPostPayloadTests
     }
 
     [Fact]
+    public void FromHtml_ChainedPost_ReturnsTheAuthorsOwnPartsInOrder()
+    {
+        var post = ThreadsPostPayload.FromHtml(Fixture("chained-post.html"), "DbChainRoot");
+
+        post!.Continuation.Select(part => part.Text).Should()
+            .Equal("part two", "part three, with a picture", "part four");
+    }
+
+    // The chain and the comment section live in the same edges list. Everything from the first
+    // stranger on is the comment section — including the author's own answers inside it.
+    [Fact]
+    public void FromHtml_ChainedPost_StopsWhereTheCommentsStart()
+    {
+        var post = ThreadsPostPayload.FromHtml(Fixture("chained-post.html"), "DbChainRoot");
+
+        post!.Continuation.Should().NotContain(part =>
+            part.Text!.Contains("comment") || part.Text.Contains("answering"));
+    }
+
+    [Fact]
+    public void FromHtml_ChainedPost_KeepsMediaAttachedToItsOwnPart()
+    {
+        var post = ThreadsPostPayload.FromHtml(Fixture("chained-post.html"), "DbChainRoot");
+
+        post!.Media.Should().ContainSingle().Which.Url.Should().Be("https://cdn.test/root-clip.mp4");
+        post.Continuation[0].Media.Should().BeEmpty();
+        post.Continuation[1].Media.Should().ContainSingle().Which.Url.Should().Be("https://cdn.test/part3.jpg");
+        post.Continuation[2].Media.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void FromHtml_PostWithoutAChain_HasNoContinuation()
+    {
+        var post = ThreadsPostPayload.FromHtml(Fixture("carousel-post.html"), "DbsHKtBiGxC");
+
+        post!.Continuation.Should().BeEmpty();
+    }
+
+    [Fact]
     public void FromJson_BlockLiftedOutOfTheBrowser_ParsesTheSameWay()
     {
         var block = ExtractFirstJsonBlock(Fixture("video-post.html"));

@@ -2,6 +2,7 @@ using LeBot.Domain.Media;
 using LeBot.Infrastructure.Telegram;
 using Microsoft.Extensions.Logging.Abstractions;
 using Telegram.Bot;
+using Telegram.Bot.Requests;
 using Telegram.Bot.Requests.Abstractions;
 using Telegram.Bot.Types;
 
@@ -72,6 +73,104 @@ public sealed class TelegramBotMessengerTests : IDisposable
         File.Exists(first).Should().BeTrue();
         File.Exists(second).Should().BeTrue();
     }
+
+    [Fact]
+    public async Task ReplyWithMediaAsync_TextOnlyChain_ArrivesAsOneMessageAfterTheMedia()
+    {
+        var payload = new MediaPayload(Source, null, null, [Video(WriteFile("clip.mp4"))])
+        {
+            FollowUps = [Text("part two"), Text("part three"), Text("part four")],
+        };
+
+        await CreateSut().ReplyWithMediaAsync(1L, 2, payload, CancellationToken.None);
+
+        // One media send, then one text send carrying all three parts — not three pings.
+        SentRequests().Should().Equal("SendVideoRequest", "SendMessageRequest");
+        SentTexts().Should().ContainSingle().Which.Should().Be("part two\n\npart three\n\npart four");
+    }
+
+    [Fact]
+    public async Task ReplyWithMediaAsync_ChainWithItsOwnMedia_BreaksTheTextRunAroundIt()
+    {
+        var partPhoto = WriteFile("part.jpg");
+        var payload = new MediaPayload(Source, null, null, [Video(WriteFile("clip.mp4"))])
+        {
+            FollowUps =
+            [
+                Text("part two"),
+                new PostSegment("part three, with a picture", [Photo(partPhoto)]),
+                Text("part four"),
+            ],
+        };
+
+        await CreateSut().ReplyWithMediaAsync(1L, 2, payload, CancellationToken.None);
+
+        SentRequests().Should().Equal(
+            "SendVideoRequest", "SendMessageRequest", "SendPhotoRequest", "SendMessageRequest");
+        SentTexts().Should().Equal("part two", "part four");
+        File.Exists(partPhoto).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ReplyWithMediaAsync_ChainLongerThanOneMessage_SplitsBetweenParts()
+    {
+        var first = new string('a', 3000);
+        var second = new string('b', 3000);
+        var payload = new MediaPayload(Source, null, null, [Video(WriteFile("clip.mp4"))])
+        {
+            FollowUps = [Text(first), Text(second)],
+        };
+
+        await CreateSut().ReplyWithMediaAsync(1L, 2, payload, CancellationToken.None);
+
+        // 6000 chars can't be one message, and neither part may be cut: two messages, whole parts.
+        SentTexts().Should().Equal(first, second);
+    }
+
+    [Fact]
+    public async Task ReplyWithTextAsync_TextOnlyPostWithAChain_SendsBodyThenTheParts()
+    {
+        var payload = new MediaPayload(Source, null, null, [], "the opening post")
+        {
+            FollowUps = [Text("part two")],
+        };
+
+        await CreateSut().ReplyWithTextAsync(1L, 2, payload, CancellationToken.None);
+
+        SentTexts().Should().Equal("the opening post", "part two");
+    }
+
+    [Fact]
+    public async Task ReplyWithMediaAsync_CachedChainMedia_SurvivesTheSend()
+    {
+        var partPhoto = WriteFile("part.jpg");
+        var payload = new MediaPayload(Source, null, null, [Video(WriteFile("clip.mp4"))], RetainFiles: true)
+        {
+            FollowUps = [new PostSegment("part two", [Photo(partPhoto)])],
+        };
+
+        await CreateSut().ReplyWithMediaAsync(1L, 2, payload, CancellationToken.None);
+
+        File.Exists(partPhoto).Should().BeTrue();
+    }
+
+    /// <summary>Every request the bot was asked to make, by type name, in order.</summary>
+    private List<string> SentRequests() =>
+        _bot.ReceivedCalls()
+            .Where(call => call.GetMethodInfo().Name == nameof(ITelegramBotClient.SendRequest))
+            .Select(call => call.GetArguments()[0]!.GetType().Name)
+            .ToList();
+
+    /// <summary>The text of every SendMessage the bot was asked to make, in order.</summary>
+    private List<string> SentTexts() =>
+        _bot.ReceivedCalls()
+            .Where(call => call.GetMethodInfo().Name == nameof(ITelegramBotClient.SendRequest))
+            .Select(call => call.GetArguments()[0])
+            .OfType<SendMessageRequest>()
+            .Select(request => request.Text)
+            .ToList();
+
+    private static PostSegment Text(string text) => new(text, []);
 
     private TelegramBotMessenger CreateSut() =>
         new(_bot, NullLogger<TelegramBotMessenger>.Instance);

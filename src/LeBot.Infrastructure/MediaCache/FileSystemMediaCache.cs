@@ -85,19 +85,27 @@ public sealed class FileSystemMediaCache : IMediaCache
                 return null;
             }
 
-            var items = new List<MediaItem>(document.Items.Count);
-            foreach (var cached in document.Items)
+            var items = RestoreItems(entryDirectory, document.Items);
+            var followUps = new List<PostSegment>(document.FollowUps.Count);
+            foreach (var segment in document.FollowUps)
             {
-                var path = Path.Combine(entryDirectory, cached.FileName);
-                if (!File.Exists(path))
+                var segmentItems = RestoreItems(entryDirectory, segment.Items);
+                if (segmentItems is null)
                 {
-                    // Someone emptied the folder under us; a partial album is worse than a re-extract.
-                    DeleteEntry(entryDirectory);
-                    _logger.LogDebug("Cache entry for {Url} is missing its media; discarded", url);
-                    return null;
+                    items = null;
+                    break;
                 }
 
-                items.Add(new MediaItem(path, cached.Kind, cached.MimeType, cached.SizeBytes, cached.DurationSeconds));
+                followUps.Add(new PostSegment(segment.Text, segmentItems));
+            }
+
+            if (items is null)
+            {
+                // Someone emptied the folder under us; a partial album — or half a thread — is worse
+                // than a re-extract.
+                DeleteEntry(entryDirectory);
+                _logger.LogDebug("Cache entry for {Url} is missing its media; discarded", url);
+                return null;
             }
 
             var payload = new MediaPayload(
@@ -106,7 +114,10 @@ public sealed class FileSystemMediaCache : IMediaCache
                 document.Author,
                 items,
                 document.Description,
-                RetainFiles: true);
+                RetainFiles: true)
+            {
+                FollowUps = followUps,
+            };
 
             return new CachedRepost(payload, document.Extractor);
         }
@@ -140,23 +151,15 @@ public sealed class FileSystemMediaCache : IMediaCache
             DeleteEntry(entryDirectory);
             Directory.CreateDirectory(entryDirectory);
 
-            var items = new List<CachedMediaItem>(payload.Items.Count);
-            for (var index = 0; index < payload.Items.Count; index++)
+            var items = StoreItems(entryDirectory, payload.Items, prefix: string.Empty);
+
+            var followUps = new List<CachedSegment>(payload.FollowUps.Count);
+            for (var index = 0; index < payload.FollowUps.Count; index++)
             {
-                var item = payload.Items[index];
-                var fileName = $"{index:D2}{SafeExtension(item.FilePath)}";
-                var destination = Path.Combine(entryDirectory, fileName);
-
-                // Copy rather than move: the caller still has to send these files and then delete
-                // them. One local copy is cheap next to a second extraction.
-                File.Copy(item.FilePath, destination, overwrite: true);
-
-                items.Add(new CachedMediaItem(
-                    fileName,
-                    item.Kind,
-                    item.MimeType,
-                    item.SizeBytes ?? new FileInfo(destination).Length,
-                    item.DurationSeconds));
+                var segment = payload.FollowUps[index];
+                followUps.Add(new CachedSegment(
+                    segment.Text,
+                    StoreItems(entryDirectory, segment.Items, prefix: $"f{index:D2}-")));
             }
 
             var document = new CachedPayloadDocument(
@@ -168,7 +171,8 @@ public sealed class FileSystemMediaCache : IMediaCache
                 payload.Author,
                 payload.Description,
                 _timeProvider.GetUtcNow(),
-                items);
+                items,
+                followUps);
 
             await WriteEntryAsync(entryDirectory, document, cancellationToken);
             Prune();
@@ -183,6 +187,58 @@ public sealed class FileSystemMediaCache : IMediaCache
             _logger.LogWarning(ex, "Could not cache the repost for {Url}", payload.SourceUrl);
             DeleteEntry(entryDirectory);
         }
+    }
+
+    /// <summary>
+    /// Rebuilds one message's media list, or null the moment a file is missing — the caller then
+    /// drops the whole entry rather than reposting part of it.
+    /// </summary>
+    private static List<MediaItem>? RestoreItems(string entryDirectory, IReadOnlyList<CachedMediaItem> cached)
+    {
+        var items = new List<MediaItem>(cached.Count);
+        foreach (var item in cached)
+        {
+            var path = Path.Combine(entryDirectory, item.FileName);
+            if (!File.Exists(path))
+            {
+                return null;
+            }
+
+            items.Add(new MediaItem(path, item.Kind, item.MimeType, item.SizeBytes, item.DurationSeconds));
+        }
+
+        return items;
+    }
+
+    /// <summary>
+    /// Copies one message's media into the entry directory. The prefix keeps a chained part's files
+    /// from colliding with the main post's — same numbering, different message.
+    /// </summary>
+    private static List<CachedMediaItem> StoreItems(
+        string entryDirectory,
+        IReadOnlyList<MediaItem> items,
+        string prefix)
+    {
+        var stored = new List<CachedMediaItem>(items.Count);
+        for (var index = 0; index < items.Count; index++)
+        {
+            var item = items[index];
+            var fileName = $"{prefix}{index:D2}{SafeExtension(item.FilePath)}";
+            var destination = Path.Combine(entryDirectory, fileName);
+
+            // Copy rather than move: the caller still has to send these files and then delete
+            // them. One local copy is cheap next to a second extraction.
+            File.Copy(item.FilePath, destination, overwrite: true);
+
+            stored.Add(new CachedMediaItem(
+                fileName,
+                item.Kind,
+                item.MimeType,
+                item.SizeBytes ?? new FileInfo(destination).Length,
+                item.DurationSeconds));
+        }
+
+        return stored;
     }
 
     /// <summary>

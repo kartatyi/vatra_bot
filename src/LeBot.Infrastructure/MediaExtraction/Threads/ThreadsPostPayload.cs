@@ -27,8 +27,16 @@ internal static partial class ThreadsPostPayload
     private static partial Regex JsonScriptBlock();
 
     /// <summary>Finds the post inside a full page. Returns null when the page carries no payload for it.</summary>
+    /// <remarks>
+    /// A page describes the same post in more than one block — one carries the media, another the
+    /// conversation it sits in — so the first block that mentions the shortcode is not necessarily
+    /// the one that knows the post continues. Read them all and keep the best of each.
+    /// </remarks>
     internal static ThreadsPost? FromHtml(string html, string shortcode)
     {
+        ThreadsPost? post = null;
+        IReadOnlyList<ThreadsPostPart> continuation = [];
+
         foreach (var block in JsonScriptBlock().Matches(html).Cast<Match>())
         {
             var json = block.Groups[1].Value;
@@ -37,14 +45,29 @@ internal static partial class ThreadsPostPayload
                 continue;
             }
 
-            var post = FromJson(json, shortcode);
-            if (post is not null)
+            var candidate = FromJson(json, shortcode);
+            if (candidate is null)
             {
-                return post;
+                continue;
+            }
+
+            if (post is null || (post.Media.Count == 0 && candidate.Media.Count > 0))
+            {
+                post = candidate;
+            }
+
+            if (continuation.Count == 0)
+            {
+                continuation = candidate.Continuation;
+            }
+
+            if (post.Media.Count > 0 && continuation.Count > 0)
+            {
+                break;
             }
         }
 
-        return null;
+        return post is null ? null : post with { Continuation = continuation };
     }
 
     /// <summary>Same walk over a single already-isolated payload block.</summary>
@@ -63,9 +86,13 @@ internal static partial class ThreadsPostPayload
 
         using (document)
         {
-            return TryFindPost(document.RootElement, shortcode, depth: 0, out var node)
-                ? Describe(node)
-                : null;
+            if (!TryFindPost(document.RootElement, shortcode, depth: 0, out var node))
+            {
+                return null;
+            }
+
+            var post = Describe(node);
+            return post with { Continuation = FindContinuation(document.RootElement, shortcode, post.Author) };
         }
     }
 
@@ -122,7 +149,13 @@ internal static partial class ThreadsPostPayload
             || element.TryGetProperty("image_versions2", out _)
             || element.TryGetProperty("video_versions", out _));
 
-    private static ThreadsPost Describe(JsonElement post)
+    private static ThreadsPost Describe(JsonElement post) =>
+        new(Author: TryGetString(post, "user", "username"),
+            Caption: TryGetString(post, "caption", "text"),
+            Media: CollectMedia(post),
+            Continuation: []);
+
+    private static List<ThreadsMediaSource> CollectMedia(JsonElement post)
     {
         var media = new List<ThreadsMediaSource>();
         if (post.TryGetProperty("carousel_media", out var carousel)
@@ -141,11 +174,137 @@ internal static partial class ThreadsPostPayload
             AddSource(post, media);
         }
 
-        return new ThreadsPost(
-            Author: TryGetString(post, "user", "username"),
-            Caption: TryGetString(post, "caption", "text"),
-            Media: media);
+        return media;
     }
+
+    /// <summary>
+    /// The parts the author chained after the linked post. A Threads page is one long conversation:
+    /// the author's own continuation, then everyone else's comments, then the author's replies to
+    /// those comments — all in the same <c>edges</c> list. Only a post that is <em>by</em> the author
+    /// <em>and</em> replies <em>to</em> the author continues the thread; the first item that isn't
+    /// ends it, which is what keeps the comment section out of the chat.
+    /// </summary>
+    private static IReadOnlyList<ThreadsPostPart> FindContinuation(
+        JsonElement root,
+        string shortcode,
+        string? author)
+    {
+        if (string.IsNullOrEmpty(author))
+        {
+            return [];
+        }
+
+        foreach (var edges in EnumerateThreadEdges(root, depth: 0))
+        {
+            var chain = ContinuationAfter(edges, shortcode, author);
+            if (chain.Count > 0)
+            {
+                return chain;
+            }
+        }
+
+        return [];
+    }
+
+    private static List<ThreadsPostPart> ContinuationAfter(JsonElement edges, string shortcode, string author)
+    {
+        var conversation = new List<JsonElement>();
+        foreach (var edge in edges.EnumerateArray())
+        {
+            if (!edge.TryGetProperty("node", out var node)
+                || !node.TryGetProperty("thread_items", out var items)
+                || items.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (var item in items.EnumerateArray())
+            {
+                if (item.TryGetProperty("post", out var post))
+                {
+                    conversation.Add(post);
+                }
+            }
+        }
+
+        var linked = conversation.FindIndex(post => HasCode(post, shortcode));
+        var parts = new List<ThreadsPostPart>();
+        if (linked < 0)
+        {
+            return parts;
+        }
+
+        for (var i = linked + 1; i < conversation.Count && ContinuesTheThread(conversation[i], author); i++)
+        {
+            var text = TryGetString(conversation[i], "caption", "text");
+            var media = CollectMedia(conversation[i]);
+            if (text is not null || media.Count > 0)
+            {
+                parts.Add(new ThreadsPostPart(text, media));
+            }
+        }
+
+        return parts;
+    }
+
+    private static IEnumerable<JsonElement> EnumerateThreadEdges(JsonElement element, int depth)
+    {
+        if (depth > MaxDepth)
+        {
+            yield break;
+        }
+
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                if (element.TryGetProperty("edges", out var edges) && IsConversation(edges))
+                {
+                    yield return edges;
+                }
+
+                foreach (var property in element.EnumerateObject())
+                {
+                    foreach (var found in EnumerateThreadEdges(property.Value, depth + 1))
+                    {
+                        yield return found;
+                    }
+                }
+
+                break;
+
+            case JsonValueKind.Array:
+                foreach (var child in element.EnumerateArray())
+                {
+                    foreach (var found in EnumerateThreadEdges(child, depth + 1))
+                    {
+                        yield return found;
+                    }
+                }
+
+                break;
+        }
+    }
+
+    private static bool IsConversation(JsonElement edges) =>
+        edges.ValueKind == JsonValueKind.Array
+        && edges.GetArrayLength() > 0
+        && edges[0].TryGetProperty("node", out var node)
+        && node.TryGetProperty("thread_items", out _);
+
+    private static bool HasCode(JsonElement post, string shortcode) =>
+        post.TryGetProperty("code", out var code)
+        && code.ValueKind == JsonValueKind.String
+        && string.Equals(code.GetString(), shortcode, StringComparison.Ordinal);
+
+    private static bool ContinuesTheThread(JsonElement post, string author) =>
+        string.Equals(TryGetString(post, "user", "username"), author, StringComparison.Ordinal)
+        && string.Equals(ReplyTarget(post), author, StringComparison.Ordinal);
+
+    private static string? ReplyTarget(JsonElement post) =>
+        post.TryGetProperty("text_post_app_info", out var info)
+        && info.ValueKind == JsonValueKind.Object
+            ? TryGetString(info, "reply_to_author", "username")
+            : null;
 
     private static void AddSource(JsonElement node, List<ThreadsMediaSource> media)
     {
