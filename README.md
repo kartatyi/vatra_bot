@@ -15,6 +15,7 @@ A Telegram group bot that re-posts the actual video / photo content from TikTok,
 - Re-posts as the right Telegram primitive: single `SendVideo` / `SendPhoto`, or `SendMediaGroup` for multi-image carousels, with the post's body text as the caption.
 - When a link is supported but media extraction fails, the bot falls back to the post's title/description as a text reply; when even that's empty, it stays silent rather than posting a "couldn't extract" notice.
 - Polly retries transient Telegram failures (429, 5xx) with exponential backoff + jitter; permanent failures (400, 403) fall through to a source-URL text reply.
+- Journals every processed link to a durable SQLite store, surfaced two ways: the `/stats`, `/failures`, and `/top` Telegram commands, and a local read-only HTML dashboard reached over an SSH tunnel (see [`docs/decisions/0004`](docs/decisions/0004-repost-journal-persistence.md) and [`0005`](docs/decisions/0005-local-html-dashboard.md)).
 
 ## Why
 
@@ -30,6 +31,7 @@ In a group chat, every external link is a context switch — open the app, watch
   - [x] Polly retry on transient Telegram errors
   - [x] CI on GitHub Actions: format gate, build, test, per-layer coverage gate
   - [x] Self-update from GitHub Releases — SHA256-verified atomic swap with health-gated rollback and operator DM (activates once the first tagged release is published — see [`docs/decisions/0002-self-update.md`](docs/decisions/0002-self-update.md))
+  - [x] Observability: durable SQLite repost journal + `/stats` `/failures` `/top` commands + a local read-only HTML dashboard ([`0004`](docs/decisions/0004-repost-journal-persistence.md), [`0005`](docs/decisions/0005-local-html-dashboard.md))
 - [ ] **Phase 2.** Conversational layer.
   - [ ] Per-user dossier storage (EF Core + SQLite -> PostgreSQL)
   - [ ] LLM-backed reply pipeline (provider TBD — see [`docs/decisions/0001-phase2-llm-provider.md`](docs/decisions/0001-phase2-llm-provider.md))
