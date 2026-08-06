@@ -91,6 +91,7 @@ internal static class Installer
 
         EnsureDirectory(Path.Combine(workDir, "tools", "yt-dlp"));
         EnsureDirectory(Path.Combine(workDir, "downloads"));
+        EnsureDirectory(Path.Combine(workDir, "cache"));
         EnsureDirectory(Path.Combine(workDir, "logs"));
         Console.WriteLine("✓ Folders created.");
 

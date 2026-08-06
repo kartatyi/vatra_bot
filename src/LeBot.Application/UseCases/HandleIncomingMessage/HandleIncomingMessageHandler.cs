@@ -9,11 +9,12 @@ namespace LeBot.Application.UseCases.HandleIncomingMessage;
 /// <summary>
 /// The Phase-1 use-case: for every URL we recognise in a chat message,
 /// extract media and reply with it. The handler stays free of I/O concerns —
-/// URL parsing, extraction, and sending are all injected ports.
+/// URL parsing, extraction, caching, and sending are all injected ports.
 /// </summary>
 public sealed class HandleIncomingMessageHandler(
     IUrlExtractor urlExtractor,
     IEnumerable<IPlatformExtractor> extractors,
+    IMediaCache cache,
     ITelegramMessenger messenger,
     RepostMetrics metrics,
     ILogger<HandleIncomingMessageHandler> logger)
@@ -47,30 +48,41 @@ public sealed class HandleIncomingMessageHandler(
         // indicator is cancelled when ProcessUrlAsync returns (success, failure, or fallback).
         await using var busy = messenger.IndicateBusy(message.ChatId, BusyKind.UploadingVideo);
 
-        MediaPayload? textFallback = null;
+        // Ask the cache before any extractor runs: a link the chat has already seen is answered
+        // from disk without a single request to the platform.
+        if (await TryServeFromCacheAsync(message, url, cancellationToken))
+        {
+            return;
+        }
+
+        (MediaPayload Payload, string Extractor)? textFallback = null;
         var sawSubstantiveAttempt = false;
 
         foreach (var extractor in candidates)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            var extractorName = extractor.GetType().Name;
             var result = await extractor.ExtractAsync(url, cancellationToken);
             switch (result)
             {
                 case Result<MediaPayload, ExtractionError>.Ok ok when ok.Value.HasMedia:
+                    // Cache first: the messenger deletes the files it was handed once the upload
+                    // finishes, so after the send there is nothing left to copy.
+                    await cache.SaveAsync(ok.Value, extractorName, cancellationToken);
                     await messenger.ReplyWithMediaAsync(
                         message.ChatId,
                         message.MessageId,
                         ok.Value,
                         cancellationToken);
-                    metrics.RecordMediaRepost(extractor.GetType().Name);
+                    metrics.RecordMediaRepost(extractorName);
                     logger.LogInformation(
                         "Reposted {Count} media item(s) from {Url} via {Extractor} into chat {ChatId}",
-                        ok.Value.Items.Count, url, extractor.GetType().Name, message.ChatId);
+                        ok.Value.Items.Count, url, extractorName, message.ChatId);
                     return;
 
                 case Result<MediaPayload, ExtractionError>.Ok ok when HasReplyableText(ok.Value):
-                    textFallback ??= ok.Value;
+                    textFallback ??= (ok.Value, extractorName);
                     sawSubstantiveAttempt = true;
                     break;
 
@@ -78,14 +90,14 @@ public sealed class HandleIncomingMessageHandler(
                     // This extractor doesn't claim the URL; treat it as if CanHandle had returned
                     // false. Silent skip — no ack, no warning.
                     logger.LogDebug(
-                        "{Extractor} marked {Url} as unsupported", extractor.GetType().Name, url);
+                        "{Extractor} marked {Url} as unsupported", extractorName, url);
                     break;
 
                 case Result<MediaPayload, ExtractionError>.Err err:
                     logger.LogWarning(
                         "{Extractor} failed for {Url}: {Reason}",
-                        extractor.GetType().Name, url, err.Error.Reason);
-                    metrics.RecordFailure(extractor.GetType().Name);
+                        extractorName, url, err.Error.Reason);
+                    metrics.RecordFailure(extractorName);
                     sawSubstantiveAttempt = true;
                     break;
 
@@ -96,14 +108,15 @@ public sealed class HandleIncomingMessageHandler(
             }
         }
 
-        if (textFallback is not null)
+        if (textFallback is { } fallback)
         {
+            await cache.SaveAsync(fallback.Payload, fallback.Extractor, cancellationToken);
             await messenger.ReplyWithTextAsync(
                 message.ChatId,
                 message.MessageId,
-                textFallback,
+                fallback.Payload,
                 cancellationToken);
-            metrics.RecordTextRepost();
+            metrics.RecordTextRepost(fallback.Extractor);
             logger.LogInformation(
                 "Reposted text body from {Url} into chat {ChatId}",
                 url, message.ChatId);
@@ -125,6 +138,52 @@ public sealed class HandleIncomingMessageHandler(
         // add chat noise. The reason was already surfaced in the loop above (a warning for hard
         // failures, debug otherwise).
         logger.LogDebug("Nothing extractable from {Url} — staying silent", url);
+    }
+
+    /// <summary>
+    /// Replays a stored repost when the URL has been handled before. Returns false on a miss — and
+    /// also for the pathological case of a stored payload with nothing left to say, which then falls
+    /// through to a normal extraction.
+    /// </summary>
+    private async Task<bool> TryServeFromCacheAsync(
+        IncomingMessage message,
+        Uri url,
+        CancellationToken cancellationToken)
+    {
+        var cached = await cache.TryGetAsync(url, cancellationToken);
+        if (cached is null)
+        {
+            return false;
+        }
+
+        if (cached.Payload.HasMedia)
+        {
+            await messenger.ReplyWithMediaAsync(
+                message.ChatId,
+                message.MessageId,
+                cached.Payload,
+                cancellationToken);
+            metrics.RecordMediaRepost(cached.Extractor);
+        }
+        else if (HasReplyableText(cached.Payload))
+        {
+            await messenger.ReplyWithTextAsync(
+                message.ChatId,
+                message.MessageId,
+                cached.Payload,
+                cancellationToken);
+            metrics.RecordTextRepost(cached.Extractor);
+        }
+        else
+        {
+            return false;
+        }
+
+        metrics.RecordCacheHit();
+        logger.LogInformation(
+            "Served {Url} from cache (originally via {Extractor}) into chat {ChatId}",
+            url, cached.Extractor, message.ChatId);
+        return true;
     }
 
     private static bool HasReplyableText(MediaPayload payload)

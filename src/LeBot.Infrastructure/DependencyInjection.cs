@@ -2,6 +2,7 @@ using LeBot.Application.Ports;
 using LeBot.Infrastructure.Configuration;
 using LeBot.Infrastructure.Diagnostics;
 using LeBot.Infrastructure.Maintenance;
+using LeBot.Infrastructure.MediaCache;
 using LeBot.Infrastructure.MediaExtraction.AutoRia;
 using LeBot.Infrastructure.MediaExtraction.Instagram;
 using LeBot.Infrastructure.MediaExtraction.Threads;
@@ -31,6 +32,7 @@ public static class DependencyInjection
         services.Configure<YtDlpOptions>(configuration.GetSection(YtDlpOptions.SectionName));
         services.Configure<UpdateOptions>(configuration.GetSection(UpdateOptions.SectionName));
         services.Configure<ThreadsOptions>(configuration.GetSection(ThreadsOptions.SectionName));
+        services.Configure<MediaCacheOptions>(configuration.GetSection(MediaCacheOptions.SectionName));
 
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IHostAccountInfo, HostAccountInfo>();
@@ -51,6 +53,11 @@ public static class DependencyInjection
 
         services.AddSingleton<ITelegramMessenger, TelegramBotMessenger>();
         services.AddSingleton<IUrlExtractor, RegexUrlExtractor>();
+
+        // One instance behind two doors: the handler sees the port, the sweep service needs the
+        // concrete type to call Prune().
+        services.AddSingleton<FileSystemMediaCache>();
+        services.AddSingleton<IMediaCache>(sp => sp.GetRequiredService<FileSystemMediaCache>());
 
         // Sources Instagram session cookies (via the same YtDlp:CookiesFromBrowser the bot already
         // uses) so the private-API extractor below can authenticate.
@@ -88,6 +95,7 @@ public static class DependencyInjection
 
         services.AddHostedService<TelegramUpdateDispatcher>();
         services.AddHostedService<DownloadsCleanupService>();
+        services.AddHostedService<MediaCacheCleanupService>();
         services.AddHostedService<YtDlpUpdateService>();
         services.AddHostedService<SelfUpdateService>();
 

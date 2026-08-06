@@ -15,6 +15,7 @@ A Telegram group bot that re-posts the actual video / photo content from TikTok,
 - Re-posts as the right Telegram primitive: single `SendVideo` / `SendPhoto`, or `SendMediaGroup` for multi-image carousels, with the post's body text as the caption.
 - When a link is supported but media extraction fails, the bot falls back to the post's title/description as a text reply; when even that's empty, it stays silent rather than posting a "couldn't extract" notice.
 - Polly retries transient Telegram failures (429, 5xx) with exponential backoff + jitter; permanent failures (400, 403) fall through to a source-URL text reply.
+- Caches every repost on disk for 24 hours, keyed by the link stripped of its share-tracking noise. Post the same clip again — or someone else's share link to it — and the reply comes straight off disk: no download, no yt-dlp, no request to the platform. See [`docs/decisions/0007-media-cache.md`](docs/decisions/0007-media-cache.md).
 
 ## Why
 
@@ -28,6 +29,7 @@ In a group chat, every external link is a context switch — open the app, watch
   - [x] `IPlatformExtractor` strategy + hybrid Instagram embed scraper as the first extractor in the chain
   - [x] Re-post pipeline: single media, `SendMediaGroup` albums, text-only fallback (silent when there's nothing to repost)
   - [x] Polly retry on transient Telegram errors
+  - [x] 24-hour on-disk media cache — a repeat link is served without touching the platform
   - [x] CI on GitHub Actions: format gate, build, test, per-layer coverage gate
   - [x] Self-update from GitHub Releases — SHA256-verified atomic swap with health-gated rollback and operator DM (activates once the first tagged release is published — see [`docs/decisions/0002-self-update.md`](docs/decisions/0002-self-update.md))
 - [ ] **Phase 2.** Conversational layer.

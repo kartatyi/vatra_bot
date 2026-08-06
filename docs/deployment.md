@@ -59,6 +59,7 @@ C:\LeBot\
       yt-dlp.exe
       ffmpeg.exe        # optional, only required if you want max-quality DASH merges
   downloads\            # created on first run, beside the exe; files >1h old swept every 30 min
+  cache\                # created on first run; one folder per link, kept 24h, capped at 2 GB
   logs\                 # created on first run, beside the exe; daily rotation, last 7 kept
 ```
 

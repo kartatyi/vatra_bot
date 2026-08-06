@@ -49,6 +49,7 @@ public class HostCompositionSmokeTests
         // produces a focused failure name instead of a confusing handler-construction error.
         host.Services.GetRequiredService<IUrlExtractor>().Should().NotBeNull();
         host.Services.GetRequiredService<ITelegramMessenger>().Should().NotBeNull();
+        host.Services.GetRequiredService<IMediaCache>().Should().NotBeNull();
         host.Services.GetServices<IPlatformExtractor>().Should().HaveCountGreaterThanOrEqualTo(2,
             "the dispatcher relies on both the embed scraper and the yt-dlp extractor being registered");
 

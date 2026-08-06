@@ -7,7 +7,7 @@
 
 A Telegram group bot that re-posts media inline so the chat never has to leave Telegram. Drop a TikTok / Reels / YT-Shorts / Threads / X / Reddit link (anything in yt-dlp's ~1800 sites) → the bot replies with the native video or photo, caption intact.
 
-- **Phase 1 — active.** Detect URLs in any group message, extract media, re-post. Reply with media, else the post's text; when extraction yields neither, stay silent — no "couldn't extract" noise.
+- **Phase 1 — active.** Detect URLs in any group message, extract media, re-post. Reply with media, else the post's text; when extraction yields neither, stay silent — no "couldn't extract" noise. A link seen in the last 24 h is served from the on-disk cache — no extractor runs at all ([ADR 0007](docs/decisions/0007-media-cache.md)).
 - **Phase 2 — planned.** Conversational layer: per-user dossiers, mention/DM replies. See [ADR 0001](docs/decisions/0001-phase2-llm-provider.md).
 
 Quality bar: **code you'd put on a CV.** Every rule below earns its place by keeping it there.
@@ -169,6 +169,17 @@ yt-dlp knobs ([`YtDlpOptions`](src/LeBot.Infrastructure/Configuration/YtDlpOptio
   "CookiesFromBrowser": null,               // "firefox" | "chrome" | … → reaches login-gated IG/X content
   "FfmpegPath": null,                        // only for formats yt-dlp must merge/transcode
   "MaxFileSizeMb": 50                        // skip above Telegram's upload ceiling
+}
+```
+
+Cache knobs ([`MediaCacheOptions`](src/LeBot.Infrastructure/Configuration/MediaCacheOptions.cs), `MediaCache` section) — the store that answers a repeat link without touching the platform:
+
+```jsonc
+"MediaCache": {
+  "Enabled": true,        // false → every link extracted fresh, as before the cache existed
+  "Directory": "cache",   // beside the exe; keep it off DownloadDirectory, whose sweep empties hourly
+  "TtlHours": 24,         // from write, never slides on access — an edited post can repost stale until then
+  "MaxTotalSizeMb": 2048  // over the cap, oldest entries are evicted first
 }
 ```
 
