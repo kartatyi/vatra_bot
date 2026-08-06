@@ -103,21 +103,21 @@ good  bot runs as the interactive user who logged into Firefox → cookies reada
 
 So if you set `CookiesFromBrowser`, re-register the Scheduled Task to run as *that* user — the manual `Register-ScheduledTask` in §5 with your own `-UserId`, not `S-1-5-18`. You don't have to guess: `--doctor` warns when it sees cookies configured while the bot would run as `LocalSystem`, and the bot logs the same warning at startup. Without cookies, Instagram image-carousel posts fall through to the text-only reply (which is fine for the user's stated requirement).
 
-## 4b. A browser for Threads video (optional)
+## 4b. A browser for Threads (optional fallback)
 
-Threads renders post video client-side, so the bot reads it by loading the page in a **headless system browser** (see [ADR 0006](decisions/0006-threads-headless-video.md)). It auto-detects **Chrome, then Edge** — Edge ships with Windows 11, so this usually needs nothing. Only act if neither is present or you want a specific binary:
+Threads posts are read from the payload the page ships with itself over plain HTTP (see [ADR 0008](decisions/0008-threads-post-payload.md)). When Meta answers a fetch with the logged-out shell instead, the bot retries the page in a **headless system browser**. It auto-detects **Chrome, then Edge** — Edge ships with Windows 11, so this usually needs nothing. Only act if neither is present or you want a specific binary:
 
 ```jsonc
 "Threads": {
-  "VideoExtractionEnabled": true,   // false → Threads video posts fall back to the thumbnail image
+  "BrowserFallbackEnabled": true,   // false → a missed payload falls back to the og:image card
   "BrowserPath": null,              // explicit chrome.exe / msedge.exe path; null = auto-detect
   "PageTimeoutSeconds": 25
 }
 ```
 
 ```text
-no Chromium browser found  → Threads video posts degrade to the og:image thumbnail (the old behaviour), nothing breaks
-Chrome or Edge present     → Threads video posts re-post as the actual clip
+no Chromium browser found  → the occasional missed post degrades to the og:image card, nothing breaks
+Chrome or Edge present     → those posts re-post as their real photos / clip too
 ```
 
 Unlike the cookies above, this works **as `LocalSystem`** (no user profile needed) and **needs no login**.
