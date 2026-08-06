@@ -4,6 +4,8 @@ using LeBot.Domain.Media;
 using LeBot.Infrastructure.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Polly;
+using Polly.Retry;
 using YoutubeDLSharp;
 using YoutubeDLSharp.Options;
 
@@ -63,12 +65,20 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
 
         try
         {
-            var metadata = await _ytdl.RunVideoDataFetch(sanitisedUrl, ct: cancellationToken, overrideOptions: optionSet);
+            var metadata = await WithTransientRetryAsync(
+                url,
+                token => _ytdl.RunVideoDataFetch(sanitisedUrl, ct: token, overrideOptions: optionSet),
+                cancellationToken);
             if (!metadata.Success || metadata.Data is null)
             {
                 var detail = JoinErrors(metadata.ErrorOutput);
 
-                if (LooksLikeUnsupportedUrl(detail))
+                // Either yt-dlp refused the URL outright, or only its catch-all [generic] extractor
+                // took it and failed — the shape of a shop / news / blog link that was never media.
+                // Both are "not our platform", not breakage: disown the URL so the handler skips it
+                // silently and it never lands in the journal as a failure.
+                if (YtDlpErrorClassifier.LooksLikeUnsupportedUrl(detail)
+                    || YtDlpErrorClassifier.IsGenericExtractorFailure(detail))
                 {
                     _logger.LogDebug("yt-dlp does not handle {Url} — leaving for other extractors / silent skip", url);
                     return Result<MediaPayload, ExtractionError>.Failure(
@@ -150,11 +160,14 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
             // video and audio streams (Instagram and some other platforms only expose DASH;
             // without this selector yt-dlp grabs both streams and then "succeeds" with no
             // merged file present on disk).
-            var download = await _ytdl.RunVideoDownload(
-                sanitisedUrl,
-                format: "best[ext=mp4]/best",
-                ct: cancellationToken,
-                overrideOptions: optionSet);
+            var download = await WithTransientRetryAsync(
+                url,
+                token => _ytdl.RunVideoDownload(
+                    sanitisedUrl,
+                    format: "best[ext=mp4]/best",
+                    ct: token,
+                    overrideOptions: optionSet),
+                cancellationToken);
             if (!download.Success || string.IsNullOrEmpty(download.Data))
             {
                 var detail = JoinErrors(download.ErrorOutput);
@@ -245,8 +258,40 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
         return opts;
     }
 
-    private static bool LooksLikeUnsupportedUrl(string detail) =>
-        detail.Contains("Unsupported URL", StringComparison.OrdinalIgnoreCase);
+    private async Task<RunResult<T>> WithTransientRetryAsync<T>(
+        Uri url,
+        Func<CancellationToken, Task<RunResult<T>>> operation,
+        CancellationToken cancellationToken)
+    {
+        var pipeline = new ResiliencePipelineBuilder<RunResult<T>>()
+            .AddRetry(new RetryStrategyOptions<RunResult<T>>
+            {
+                ShouldHandle = new PredicateBuilder<RunResult<T>>()
+                    .HandleResult(r => !r.Success && YtDlpErrorClassifier.IsTransientChallengeFailure(JoinErrors(r.ErrorOutput))),
+                // Measured ~50% success per attempt against a challenged TikTok URL (yt-dlp
+                // 2026.07.04), and attempts look independent — so 10 total tries lands around
+                // 99.9%. Metadata fetch and download each roll the challenge separately, which
+                // compounds to ~99.8% end-to-end. Raising the cap is nearly free: the expected
+                // attempt count stays 2, so a typical link still lands in seconds — the cap only
+                // bounds the tail, at ~4s per attempt.
+                MaxRetryAttempts = 9,
+                BackoffType = DelayBackoffType.Constant,
+                Delay = TimeSpan.FromMilliseconds(500),
+                UseJitter = true,
+                OnRetry = args =>
+                {
+                    _logger.LogWarning(
+                        "Retrying yt-dlp call for {Url} after transient TikTok challenge failure (attempt {Attempt} after {DelayMs}ms)",
+                        url,
+                        args.AttemptNumber + 1,
+                        args.RetryDelay.TotalMilliseconds);
+                    return ValueTask.CompletedTask;
+                },
+            })
+            .Build();
+
+        return await pipeline.ExecuteAsync(async token => await operation(token), cancellationToken);
+    }
 
     private async Task<Result<MediaPayload, ExtractionError>> DownloadPlaylistAsync(
         Uri url,
@@ -255,11 +300,14 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
         OptionSet optionSet,
         CancellationToken cancellationToken)
     {
-        var playlistResult = await _ytdl.RunVideoPlaylistDownload(
-            sanitisedUrl,
-            format: "best[ext=mp4]/best",
-            ct: cancellationToken,
-            overrideOptions: optionSet);
+        var playlistResult = await WithTransientRetryAsync(
+            url,
+            token => _ytdl.RunVideoPlaylistDownload(
+                sanitisedUrl,
+                format: "best[ext=mp4]/best",
+                ct: token,
+                overrideOptions: optionSet),
+            cancellationToken);
 
         if (!playlistResult.Success || playlistResult.Data is null or { Length: 0 })
         {

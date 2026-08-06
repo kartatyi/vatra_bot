@@ -29,6 +29,7 @@ internal static class DashboardReportFormatter
 
         sb.Append("Since boot — media ").Append(Num(metrics.MediaReposts))
             .Append(", text ").Append(Num(metrics.TextReposts))
+            .Append(", cached ").Append(Num(metrics.CacheHits))
             .Append(", failures ").Append(Num(metrics.Failures))
             .Append(", skipped ").Append(Num(metrics.SilentSkips)).Append('\n');
 

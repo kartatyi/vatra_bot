@@ -19,6 +19,7 @@ public class DashboardReportFormatterTests
         metrics.RecordFailure("YtDlpPlatformExtractor");
         metrics.RecordFailure("YtDlpPlatformExtractor");
         metrics.RecordSilentSkip();
+        metrics.RecordCacheHit();
 
         var allTime = new RepostStatsSnapshot(
             TotalProcessed: 10, MediaReposts: 5, TextFallbacks: 1,
@@ -29,7 +30,7 @@ public class DashboardReportFormatterTests
         var report = DashboardReportFormatter.Stats(metrics, TimeSpan.FromHours(1) + TimeSpan.FromMinutes(2) + TimeSpan.FromSeconds(3), allTime);
 
         report.Should().Contain("Uptime: 01:02:03");
-        report.Should().Contain("Since boot — media 3, text 1, failures 2, skipped 1");
+        report.Should().Contain("Since boot — media 3, text 1, cached 1, failures 2, skipped 1");
         report.Should().Contain("YtDlpPlatformExtractor: 5"); // 3 media + 2 failures
         report.Should().Contain("All-time (since 2026-06-20): 10 processed");
         report.Should().Contain("60.0% success — media 5, text 1");

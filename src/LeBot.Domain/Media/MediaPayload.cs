@@ -9,12 +9,19 @@ namespace LeBot.Domain.Media;
 /// <param name="Author">The uploader / channel / handle; may be null.</param>
 /// <param name="Items">One or more media items. Empty payloads are allowed but signal "nothing to repost".</param>
 /// <param name="Description">The post's caption / body text from the platform; may be null. Often more useful than <paramref name="Title"/> on Instagram, TikTok, and Threads.</param>
+/// <param name="RetainFiles">
+/// Who owns the files behind <paramref name="Items"/>. False (the default) means they are throw-away
+/// downloads and the sender deletes them once the upload finishes. True means they belong to a
+/// longer-lived store — the media cache — and must survive the send so the next repost of the same
+/// link can reuse them.
+/// </param>
 public sealed record MediaPayload(
     Uri SourceUrl,
     string? Title,
     string? Author,
     IReadOnlyList<MediaItem> Items,
-    string? Description = null)
+    string? Description = null,
+    bool RetainFiles = false)
 {
     /// <summary>True when the payload contains at least one media item.</summary>
     public bool HasMedia => Items.Count > 0;

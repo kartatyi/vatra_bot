@@ -13,8 +13,9 @@ namespace LeBot.Infrastructure.Telegram;
 /// <summary>
 /// Adapter over <see cref="ITelegramBotClient"/>. Picks the right send-method for each
 /// <see cref="MediaKind"/>, retries transient Telegram failures with exponential backoff,
-/// falls back to a plain source-URL reply when the upload is permanently refused, and
-/// always cleans the local file after the attempt.
+/// falls back to a plain source-URL reply when the upload is permanently refused, and cleans
+/// the local file after the attempt — unless the payload is flagged
+/// <see cref="MediaPayload.RetainFiles"/>, which means the media cache owns those bytes.
 /// </summary>
 public sealed class TelegramBotMessenger(
     ITelegramBotClient bot,
@@ -65,11 +66,11 @@ public sealed class TelegramBotMessenger(
 
         if (payload.Items.Count == 1)
         {
-            await SendSingleAsync(chatId, reply, payload.Items[0], caption, payload.SourceUrl, cancellationToken);
+            await SendSingleAsync(chatId, reply, payload.Items[0], caption, payload, cancellationToken);
         }
         else
         {
-            await SendAlbumAsync(chatId, reply, payload.Items, caption, payload.SourceUrl, cancellationToken);
+            await SendAlbumAsync(chatId, reply, payload.Items, caption, payload, cancellationToken);
         }
     }
 
@@ -123,7 +124,7 @@ public sealed class TelegramBotMessenger(
         ReplyParameters reply,
         MediaItem item,
         string? caption,
-        Uri sourceUrl,
+        MediaPayload payload,
         CancellationToken cancellationToken)
     {
         try
@@ -138,13 +139,13 @@ public sealed class TelegramBotMessenger(
                 ex.ErrorCode, ex.Message);
             await SendWithRetryAsync(ct => bot.SendMessage(
                 chatId: chatId,
-                text: $"Couldn't repost the media. Source: {sourceUrl}",
+                text: $"Couldn't repost the media. Source: {payload.SourceUrl}",
                 replyParameters: reply,
                 cancellationToken: ct), cancellationToken);
         }
         finally
         {
-            BestEffortDelete(item.FilePath);
+            DeleteUnlessRetained(payload, item.FilePath);
         }
     }
 
@@ -153,7 +154,7 @@ public sealed class TelegramBotMessenger(
         ReplyParameters reply,
         IReadOnlyList<MediaItem> items,
         string? caption,
-        Uri sourceUrl,
+        MediaPayload payload,
         CancellationToken cancellationToken)
     {
         var batch = items.Count > MaxAlbumSize ? items.Take(MaxAlbumSize).ToList() : items;
@@ -173,7 +174,7 @@ public sealed class TelegramBotMessenger(
                 IAlbumInputMedia media = item.Kind switch
                 {
                     MediaKind.Photo => new InputMediaPhoto(inputFile) { Caption = itemCaption },
-                    MediaKind.Video => new InputMediaVideo(inputFile) { Caption = itemCaption },
+                    MediaKind.Video => new InputMediaVideo(inputFile) { Caption = itemCaption, SupportsStreaming = true },
                     _ => new InputMediaDocument(inputFile) { Caption = itemCaption },
                 };
                 album.Add(media);
@@ -195,7 +196,7 @@ public sealed class TelegramBotMessenger(
                     batch.Count, ex.ErrorCode, ex.Message);
                 await SendWithRetryAsync(ct => bot.SendMessage(
                     chatId: chatId,
-                    text: $"Couldn't repost the album. Source: {sourceUrl}",
+                    text: $"Couldn't repost the album. Source: {payload.SourceUrl}",
                     replyParameters: reply,
                     cancellationToken: ct), cancellationToken);
             }
@@ -208,7 +209,7 @@ public sealed class TelegramBotMessenger(
             }
             foreach (var item in items)
             {
-                BestEffortDelete(item.FilePath);
+                DeleteUnlessRetained(payload, item.FilePath);
             }
         }
     }
@@ -226,10 +227,16 @@ public sealed class TelegramBotMessenger(
         switch (item.Kind)
         {
             case MediaKind.Video:
+                // supportsStreaming makes Telegram prepare the upload for progressive playback
+                // (moov atom up front) and render the inline player with a play button — without
+                // it a non-faststart MP4 falls back to a generic file with a download button.
+                // duration is the one dimension we have; width/height Telegram reads from the bytes.
                 await SendWithRetryAsync(ct => bot.SendVideo(
                     chatId: chatId,
                     video: inputFile,
+                    duration: item.DurationSeconds,
                     caption: caption,
+                    supportsStreaming: true,
                     replyParameters: reply,
                     cancellationToken: ct), cancellationToken);
                 break;
@@ -265,6 +272,21 @@ public sealed class TelegramBotMessenger(
 
     private static bool IsTransientTelegramError(ApiRequestException ex) =>
         ex.ErrorCode == 429 || ex.ErrorCode is >= 500 and < 600;
+
+    /// <summary>
+    /// Deletes a just-sent file unless the payload says otherwise. Cached payloads point straight at
+    /// the media cache's own copies — deleting those would throw away exactly what the cache exists
+    /// to keep, and the next repost of the link would go back to the platform for nothing.
+    /// </summary>
+    private void DeleteUnlessRetained(MediaPayload payload, string filePath)
+    {
+        if (payload.RetainFiles)
+        {
+            return;
+        }
+
+        BestEffortDelete(filePath);
+    }
 
     private void BestEffortDelete(string filePath)
     {

@@ -3,7 +3,10 @@ using LeBot.Application.Telemetry;
 using LeBot.Infrastructure.Configuration;
 using LeBot.Infrastructure.Diagnostics;
 using LeBot.Infrastructure.Maintenance;
+using LeBot.Infrastructure.MediaCache;
+using LeBot.Infrastructure.MediaExtraction.AutoRia;
 using LeBot.Infrastructure.MediaExtraction.Instagram;
+using LeBot.Infrastructure.MediaExtraction.Threads;
 using LeBot.Infrastructure.MediaExtraction.ThreadsEmbed;
 using LeBot.Infrastructure.MediaExtraction.YtDlp;
 using LeBot.Infrastructure.Persistence;
@@ -32,6 +35,8 @@ public static class DependencyInjection
         services.Configure<TelegramOptions>(configuration.GetSection(TelegramOptions.SectionName));
         services.Configure<YtDlpOptions>(configuration.GetSection(YtDlpOptions.SectionName));
         services.Configure<UpdateOptions>(configuration.GetSection(UpdateOptions.SectionName));
+        services.Configure<ThreadsOptions>(configuration.GetSection(ThreadsOptions.SectionName));
+        services.Configure<MediaCacheOptions>(configuration.GetSection(MediaCacheOptions.SectionName));
         services.Configure<TelemetryOptions>(configuration.GetSection(TelemetryOptions.SectionName));
 
         services.TryAddSingleton(TimeProvider.System);
@@ -72,18 +77,34 @@ public static class DependencyInjection
         services.AddSingleton<ITelegramMessenger, TelegramBotMessenger>();
         services.AddSingleton<IUrlExtractor, RegexUrlExtractor>();
 
+        // One instance behind two doors: the handler sees the port, the sweep service needs the
+        // concrete type to call Prune().
+        services.AddSingleton<FileSystemMediaCache>();
+        services.AddSingleton<IMediaCache>(sp => sp.GetRequiredService<FileSystemMediaCache>());
+
         // Sources Instagram session cookies (via the same YtDlp:CookiesFromBrowser the bot already
         // uses) so the private-API extractor below can authenticate.
         services.AddSingleton<IBrowserCookieJarReader, YtDlpCookieJarReader>();
         services.AddSingleton<IInstagramCookieProvider, YtDlpCookieProvider>();
+
+        // Drives a headless system browser (Chrome/Edge) over the DevTools Protocol to recover the
+        // client-side-rendered video URL on Threads posts (see ADR 0006).
+        services.AddSingleton<IBrowserVideoResolver, ChromeDevToolsVideoResolver>();
 
         // Order matters: extractors are tried in the order they're registered. The narrow extractors
         // claim URL families that yt-dlp can't serve (Instagram photo posts / carousels, Threads
         // posts on the new .com domain) and run first; a successful extraction pulls the chain out
         // before yt-dlp wastes a process spawn on the same URL. When they return nothing useful the
         // handler falls through to YtDlpPlatformExtractor, which handles everything else.
+        //
+        // ThreadsVideoExtractor precedes ThreadsEmbedExtractor: it claims video posts (returning the
+        // real clip), and declines photo/text posts so the embed extractor's og:image still serves.
         services.AddSingleton<IPlatformExtractor, InstagramApiExtractor>();
+        services.AddSingleton<IPlatformExtractor, ThreadsVideoExtractor>();
         services.AddSingleton<IPlatformExtractor, ThreadsEmbedExtractor>();
+        // auto.ria isn't in yt-dlp's site list; this extractor reposts an advert's photo gallery with
+        // a spec caption. It claims only auto.ria advert URLs, so ordering ahead of yt-dlp is harmless.
+        services.AddSingleton<IPlatformExtractor, AutoRiaExtractor>();
         services.AddSingleton<IPlatformExtractor, YtDlpPlatformExtractor>();
 
         services.AddSingleton<IReleaseSource, GitHubReleaseSource>();
@@ -101,6 +122,7 @@ public static class DependencyInjection
 
         services.AddHostedService<TelegramUpdateDispatcher>();
         services.AddHostedService<DownloadsCleanupService>();
+        services.AddHostedService<MediaCacheCleanupService>();
         services.AddHostedService<YtDlpUpdateService>();
         services.AddHostedService<SelfUpdateService>();
 
