@@ -27,12 +27,12 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
         _options = options.Value;
         _logger = logger;
 
-        Directory.CreateDirectory(_options.DownloadDirectory);
+        Directory.CreateDirectory(_options.ResolvedDownloadDirectory);
 
         _ytdl = new YoutubeDL
         {
             YoutubeDLPath = ExecutablePathResolver.Resolve(_options.BinaryPath),
-            OutputFolder = _options.DownloadDirectory,
+            OutputFolder = _options.ResolvedDownloadDirectory,
         };
 
         if (!string.IsNullOrEmpty(_options.FfmpegPath))
@@ -216,13 +216,20 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
         catch (UnauthorizedAccessException) { }
     }
 
-    private OptionSet BuildOptionSet()
+    internal OptionSet BuildOptionSet()
     {
         var opts = new OptionSet();
         if (!string.IsNullOrEmpty(_options.CookiesFromBrowser))
         {
             opts.CookiesFromBrowser = _options.CookiesFromBrowser;
         }
+        // TikTok's bytevc1 (h265) streams advertise acodec=aac in metadata but the
+        // downloaded files carry no audio track at all, and the default sort ranks
+        // them "best" by resolution — so "best[ext=mp4]" silently picks a mute video.
+        // Ranking h264 above h265 selects the streams that really have sound, and
+        // h264 also plays inline on more Telegram clients. Format filters can't
+        // catch this: [acodec!=none] trusts the same lying metadata.
+        opts.FormatSort = "vcodec:h264";
         // Without this, Instagram image carousels (which surface as playlist entries
         // with empty formats) make yt-dlp fail metadata fetch entirely. We'd rather get
         // the title and description back and surface them as a text reply than swallow

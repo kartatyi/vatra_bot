@@ -58,7 +58,7 @@ public sealed class DownloadsCleanupService : BackgroundService
     // test without spinning up the background loop and its real-time interval timer.
     internal void Sweep()
     {
-        if (!Directory.Exists(_options.DownloadDirectory))
+        if (!Directory.Exists(_options.ResolvedDownloadDirectory))
         {
             return;
         }
@@ -66,7 +66,7 @@ public sealed class DownloadsCleanupService : BackgroundService
         var cutoff = _timeProvider.GetUtcNow().UtcDateTime - MaxFileAge;
         var deleted = 0;
 
-        foreach (var path in Directory.EnumerateFiles(_options.DownloadDirectory))
+        foreach (var path in Directory.EnumerateFiles(_options.ResolvedDownloadDirectory))
         {
             try
             {

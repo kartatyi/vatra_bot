@@ -10,6 +10,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The Host's appsettings.json, linked in and embedded as the canonical default config layer so a
+         lone single-file exe still has working Serilog/YtDlp/Update defaults (see
+         EmbeddedAppConfiguration). One source file, linked — the embedded copy can never drift from the
+         on-disk one the Host also ships as Content. LogicalName pins the manifest name the loader reads. -->
+    <EmbeddedResource Include="..\LeBot.Host\appsettings.json" Link="appsettings.defaults.json" LogicalName="LeBot.Infrastructure.appsettings.defaults.json" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="LeBot.Infrastructure.Tests" />
     <!-- Lets NSubstitute (Castle DynamicProxy) mock internal ports such as IUpdateInstaller. -->
     <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
@@ -22,6 +30,16 @@
     <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
     <PackageReference Include="Polly" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <!-- Pulled in directly only to force the patched SQLitePCLRaw bundle over EF Core's vulnerable
+         transitive 2.1.11 (see Directory.Packages.props). -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
+    <!-- Design-time only: powers `dotnet ef migrations`. PrivateAssets keeps it out of the Host's
+         published output, where nothing needs it at runtime. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
   </ItemGroup>
 
 </Project>

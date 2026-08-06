@@ -49,7 +49,7 @@ public sealed partial class ThreadsEmbedExtractor : IPlatformExtractor
         _options = options.Value;
         _logger = logger;
 
-        Directory.CreateDirectory(_options.DownloadDirectory);
+        Directory.CreateDirectory(_options.ResolvedDownloadDirectory);
 
         _retryPipeline = new ResiliencePipelineBuilder<HttpResponseMessage>()
             .AddRetry(new RetryStrategyOptions<HttpResponseMessage>
@@ -215,7 +215,7 @@ public sealed partial class ThreadsEmbedExtractor : IPlatformExtractor
             }
 
             var extension = GuessExtension(response.Content.Headers.ContentType) ?? ".jpg";
-            var filePath = Path.Combine(_options.DownloadDirectory, $"threads_{Guid.NewGuid():N}{extension}");
+            var filePath = Path.Combine(_options.ResolvedDownloadDirectory, $"threads_{Guid.NewGuid():N}{extension}");
 
             await using (var fileStream = File.Create(filePath))
             await using (var httpStream = await response.Content.ReadAsStreamAsync(cancellationToken))
