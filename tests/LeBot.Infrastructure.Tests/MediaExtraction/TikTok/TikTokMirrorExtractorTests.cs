@@ -145,6 +145,19 @@ public class TikTokMirrorExtractorTests
     }
 
     [Fact]
+    public async Task ExtractAsync_MediaUrlWithNonHttpScheme_IsSkipped()
+    {
+        var sut = CreateSut(request => request.RequestUri!.Host == "mirror.test"
+            ? Json("""{ "code": 0, "data": { "title": "t", "play": "ftp://cdn.test/clip.mp4" } }""")
+            : Binary("video/mp4"));
+
+        var result = await sut.ExtractAsync(new Uri("https://vt.tiktok.com/abc/"), CancellationToken.None);
+
+        var ok = result.Should().BeOfType<Result<MediaPayload, ExtractionError>.Ok>().Subject;
+        ok.Value.Items.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task ExtractAsync_FallbackDisabled_DisownsUrlWithoutCallingMirror()
     {
         var mirrorCalled = false;

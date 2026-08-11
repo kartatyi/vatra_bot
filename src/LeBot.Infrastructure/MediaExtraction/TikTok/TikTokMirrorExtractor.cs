@@ -386,16 +386,23 @@ internal sealed class TikTokMirrorExtractor : IPlatformExtractor
     /// Mirrors sometimes answer with a host-relative path (<c>/video/tos/…</c>) that only resolves
     /// against the mirror's own origin. Returns null for anything that still isn't a usable http(s)
     /// URL, so a malformed entry is skipped instead of throwing mid-download.
+    /// <para>
+    /// The scheme check has to gate the absolute branch rather than short-circuit after it: on Unix
+    /// a leading-slash path parses as an absolute <c>file:</c> URI, so testing "is it absolute" alone
+    /// would send every host-relative path down the wrong branch and silently drop the media.
+    /// </para>
     /// </summary>
     private static Uri? Absolutise(string endpoint, string candidate)
     {
-        if (Uri.TryCreate(candidate, UriKind.Absolute, out var absolute))
+        if (Uri.TryCreate(candidate, UriKind.Absolute, out var absolute)
+            && absolute.Scheme is "http" or "https")
         {
-            return absolute.Scheme is "http" or "https" ? absolute : null;
+            return absolute;
         }
 
         return Uri.TryCreate(endpoint, UriKind.Absolute, out var baseUri)
             && Uri.TryCreate(baseUri, candidate, out var combined)
+            && combined.Scheme is "http" or "https"
             ? combined
             : null;
     }
