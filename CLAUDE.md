@@ -46,7 +46,7 @@ Arrows point inward only — enforced by `.csproj` references. Infrastructure re
 Host → Infrastructure → Application → Domain
 ```
 
-One extractor per platform under `Infrastructure/MediaExtraction/<Platform>/`, behind the port [`IPlatformExtractor`](src/LeBot.Application/Ports/IPlatformExtractor.cs) (`CanHandle` + `ExtractAsync`). The resolver picks the first extractor whose `CanHandle(uri)` is true.
+One extractor per platform under `Infrastructure/MediaExtraction/<Platform>/`, behind the port [`IPlatformExtractor`](src/LeBot.Application/Ports/IPlatformExtractor.cs) (`CanHandle` + `ExtractAsync`). Every extractor whose `CanHandle(uri)` is true is tried **in registration order** until one yields media — a failure falls through to the next, so ordering in [`DependencyInjection`](src/LeBot.Infrastructure/DependencyInjection.cs) *is* the priority. Narrow extractors register first; `YtDlpPlatformExtractor` is the catch-all; anything after it is a fallback for when yt-dlp rots ([ADR 0008](docs/decisions/0008-tiktok-mirror-fallback.md)).
 
 | Concern | Choice |
 |---|---|
@@ -189,6 +189,16 @@ Cache knobs ([`MediaCacheOptions`](src/LeBot.Infrastructure/Configuration/MediaC
   "Directory": "cache",   // beside the exe; keep it off DownloadDirectory, whose sweep empties hourly
   "TtlHours": 24,         // from write, never slides on access — an edited post can repost stale until then
   "MaxTotalSizeMb": 4096  // over the cap, oldest entries are evicted first
+}
+```
+
+TikTok fallback knobs ([`TikTokOptions`](src/LeBot.Infrastructure/Configuration/TikTokOptions.cs), `TikTok` section) — runs **only** after yt-dlp has already failed, which is what TikTok's anti-bot challenge does to it for days at a stretch ([ADR 0008](docs/decisions/0008-tiktok-mirror-fallback.md)):
+
+```jsonc
+"TikTok": {
+  "MirrorFallbackEnabled": true,                          // false → TikTok goes silent when yt-dlp breaks, as before
+  "MirrorEndpoints": [ "https://www.tikwm.com/api/" ],    // tried in order; a third party sees the URL when reached
+  "TimeoutSeconds": 20                                    // per mirror — yt-dlp already spent its time failing
 }
 ```
 
