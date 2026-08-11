@@ -8,6 +8,7 @@ using LeBot.Infrastructure.MediaExtraction.AutoRia;
 using LeBot.Infrastructure.MediaExtraction.Instagram;
 using LeBot.Infrastructure.MediaExtraction.Threads;
 using LeBot.Infrastructure.MediaExtraction.ThreadsEmbed;
+using LeBot.Infrastructure.MediaExtraction.TikTok;
 using LeBot.Infrastructure.MediaExtraction.YtDlp;
 using LeBot.Infrastructure.Persistence;
 using LeBot.Infrastructure.Releases;
@@ -38,6 +39,7 @@ public static class DependencyInjection
         services.Configure<ThreadsOptions>(configuration.GetSection(ThreadsOptions.SectionName));
         services.Configure<MediaCacheOptions>(configuration.GetSection(MediaCacheOptions.SectionName));
         services.Configure<TelemetryOptions>(configuration.GetSection(TelemetryOptions.SectionName));
+        services.Configure<TikTokOptions>(configuration.GetSection(TikTokOptions.SectionName));
 
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IHostAccountInfo, HostAccountInfo>();
@@ -106,6 +108,11 @@ public static class DependencyInjection
         // a spec caption. It claims only auto.ria advert URLs, so ordering ahead of yt-dlp is harmless.
         services.AddSingleton<IPlatformExtractor, AutoRiaExtractor>();
         services.AddSingleton<IPlatformExtractor, YtDlpPlatformExtractor>();
+        // Strictly after yt-dlp: a mirror is a worse source (third party, no cookies, no format
+        // choice) and only earns its turn once yt-dlp has failed. TikTok's anti-bot challenge breaks
+        // yt-dlp's extractor for days at a stretch, and this keeps the chat served meanwhile. See
+        // ADR 0008.
+        services.AddSingleton<IPlatformExtractor, TikTokMirrorExtractor>();
 
         services.AddSingleton<IReleaseSource, GitHubReleaseSource>();
         services.AddSingleton<IAppVersion, AssemblyAppVersion>();
