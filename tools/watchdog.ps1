@@ -9,6 +9,10 @@
     queries the journal when the database actually changed, so an idle bot costs nothing —
     no agent is started until a real failure lands.
 
+    The same tick also checks that the bot process exists at all, and alerts once if it
+    has been gone longer than the grace period. It never restarts it — that is the
+    scheduled task's job (tools/install-autostart.ps1).
+
     Everything identifying the deployment (report chat id, bot token) is read at runtime
     from files under -DeployRoot. Nothing in this repository may carry it.
 
@@ -39,7 +43,14 @@ param(
     [switch] $ObserveOnly,
 
     # Hard ceiling on one agent run before it is killed.
-    [int] $AgentTimeoutMinutes = 30
+    [int] $AgentTimeoutMinutes = 30,
+
+    # Process the bot runs as, watched for liveness alongside the journal.
+    [string] $BotProcessName = 'LeBot.Host',
+
+    # How long the bot may be missing before it counts as down rather than restarting.
+    # Task Scheduler retries every minute, so this is a few of its ticks.
+    [int] $LivenessGraceMinutes = 3
 )
 
 $ErrorActionPreference = 'Stop'
@@ -108,6 +119,41 @@ function Send-OperatorAlert {
     }
     catch {
         Write-Log "telegram alert failed: $($_.Exception.Message)" 'WRN'
+    }
+}
+
+# Liveness is a different question from the journal, and the journal cannot answer it: a
+# dead bot writes no failures, so to the loop below a dead bot looks exactly like a quiet
+# night. That is how 2026-08-13 went unnoticed for fourteen hours.
+#
+# This only reports. Restarting belongs to the scheduled task (tools/install-autostart.ps1)
+# — two supervisors racing to start one bot means two long-pollers on one token, which
+# Telegram answers with a 409 and neither instance survives cleanly.
+function Watch-BotLiveness {
+    if (@(Get-Process -Name $BotProcessName -ErrorAction SilentlyContinue).Count -gt 0) {
+        if ($script:BotDownSince) {
+            $downMinutes = [int] ([datetime]::UtcNow - $script:BotDownSince).TotalMinutes
+            Write-Log "bot process is back after ${downMinutes}m"
+            if ($script:BotDownAlerted) {
+                Send-OperatorAlert "Watchdog: бот знову працює, простій ~${downMinutes} хв."
+            }
+        }
+        $script:BotDownSince   = $null
+        $script:BotDownAlerted = $false
+        return
+    }
+
+    if (-not $script:BotDownSince) {
+        $script:BotDownSince = [datetime]::UtcNow
+        Write-Log "bot process '$BotProcessName' is gone — giving the scheduled task ${LivenessGraceMinutes}m" 'WRN'
+        return
+    }
+
+    if (-not $script:BotDownAlerted -and
+        ([datetime]::UtcNow - $script:BotDownSince).TotalMinutes -ge $LivenessGraceMinutes) {
+        $script:BotDownAlerted = $true
+        Write-Log "bot process '$BotProcessName' still down after ${LivenessGraceMinutes}m" 'ERR'
+        Send-OperatorAlert "Watchdog: бот лежить уже ${LivenessGraceMinutes}+ хв і не піднявся сам. Перевір задачу планувальника «LeBot»."
     }
 }
 
@@ -276,9 +322,16 @@ Write-Log "watchdog up — poll ${PollSeconds}s, checkpoint $($state.checkpointI
 
 $lastStamp = ''
 $authAlerted = $false
+$script:BotDownSince = $null
+$script:BotDownAlerted = $false
 
 while ($true) {
     try {
+        # Ahead of the PAUSE check deliberately: PAUSE silences agent runs, but "the bot is
+        # not running" is the one thing you always want to hear — the more so because the
+        # 401 auto-pause path below writes PAUSE itself.
+        Watch-BotLiveness
+
         if (Test-Path $PausePath) {
             if (-not $Once) { Start-Sleep -Seconds $PollSeconds; continue }
             Write-Log 'PAUSE file present — nothing to do'
