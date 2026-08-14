@@ -206,6 +206,21 @@ The process list lives in `<DeployRoot>\autostart.json`, never in this repo — 
 
 Remove it all with `-Uninstall`; the tasks go, the running processes don't.
 
+**Swapping a binary under a live task** needs the ownership handed back and forth, or the task restores the old exe on top of your copy mid-swap:
+
+```powershell
+Disable-ScheduledTask -TaskName 'LeBot'; Stop-ScheduledTask -TaskName 'LeBot'
+Copy-Item <new>\LeBot.Host.exe D:\lebot\LeBot.Host.exe -Force   # after the handle releases
+Enable-ScheduledTask -TaskName 'LeBot'; Start-ScheduledTask -TaskName 'LeBot'
+```
+
+```text
+Stop-Process, copy, Start-Process  → the task starts its own copy within the minute → two pollers → 409
+disable, stop, copy, enable, start → one process, and it is the new binary
+```
+
+The watchdog runs the deployment's own copy of `watchdog.ps1`, not the repo's, so that checking out a branch here cannot change what is executing. Re-copy it into `<DeployRoot>\watchdog\` (with `watchdog-prompt.md`) after changing either.
+
 The watchdog's own liveness check reports what the tasks quietly fix — see `tools/watchdog.ps1`. It alerts on Telegram when the bot has been missing for `-LivenessGraceMinutes`, and never restarts it: one supervisor, or you get the 409 above.
 
 ### Watch the logs
