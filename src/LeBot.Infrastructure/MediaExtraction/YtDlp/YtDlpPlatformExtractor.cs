@@ -144,13 +144,18 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
             }
 
             // Some posts come back with rich metadata (title, description, uploader) but no
-            // downloadable formats at all — Instagram image carousels and text-only Threads
-            // posts shaped as single entries are the usual culprit. Surface the metadata as
-            // text-only rather than burning a download attempt that always 404s.
-            if (info.Formats is null or { Length: 0 })
+            // playable formats at all — Instagram image carousels and text-only Threads posts
+            // shaped as single entries are the usual culprit. A subtler case: a plain webpage
+            // (a homepage, a blog) that merely embeds a YouTube video, where yt-dlp reaches the
+            // video only through its generic extractor and hands back nothing but storyboard
+            // frames (protocol=mhtml, vcodec=none, acodec=none) — formats that exist but can't
+            // be played. Both must surface as text-only; pushing storyboards into a
+            // "best[ext=mp4]/best" download always ends in "No video formats found", a hard
+            // ToolFailure that lands in the journal for what was never a real media post.
+            if (!HasPlayableMedia(info.Formats))
             {
                 _logger.LogInformation(
-                    "Skipping {Url}: yt-dlp returned no downloadable formats — surfacing text only",
+                    "Skipping {Url}: yt-dlp returned no playable media formats — surfacing text only",
                     url);
                 return Result<MediaPayload, ExtractionError>.Success(
                     new MediaPayload(url, info.Title, info.Uploader, [], info.Description));
@@ -349,6 +354,35 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
         return Result<MediaPayload, ExtractionError>.Success(
             new MediaPayload(url, info.Title, info.Uploader, items, info.Description));
     }
+
+    /// <summary>
+    /// True when at least one format carries a real video or audio stream. yt-dlp lists
+    /// storyboard and thumbnail "formats" (protocol=mhtml, vcodec=none, acodec=none) even for
+    /// pages that expose no playable media — an empty or storyboard-only list means there is
+    /// nothing to download, so the caller should fall back to a text-only reply rather than
+    /// attempt a format selection that can only fail.
+    /// </summary>
+    internal static bool HasPlayableMedia(YoutubeDLSharp.Metadata.FormatData[]? formats)
+    {
+        if (formats is null or { Length: 0 })
+        {
+            return false;
+        }
+
+        foreach (var format in formats)
+        {
+            if (HasRealCodec(format.VideoCodec) || HasRealCodec(format.AudioCodec))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // yt-dlp writes the literal string "none" (not null) for a stream a format lacks.
+    private static bool HasRealCodec(string? codec) =>
+        !string.IsNullOrEmpty(codec) && !codec.Equals("none", StringComparison.OrdinalIgnoreCase);
 
     private static bool AllEntriesHaveNoFormats(YoutubeDLSharp.Metadata.VideoData[] entries)
     {
