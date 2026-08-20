@@ -18,6 +18,16 @@ namespace LeBot.Infrastructure.MediaExtraction.YtDlp;
 /// </summary>
 public sealed class YtDlpPlatformExtractor : IPlatformExtractor
 {
+    /// <summary>
+    /// Format selection, in falling order of preference. A pre-merged single file first, because
+    /// it needs no ffmpeg pass. Then the DASH pairs: YouTube no longer publishes a muxed format
+    /// for most videos, so <c>best</c> — which by definition only matches a format carrying both
+    /// streams — matches nothing there and yt-dlp exits "No video formats found" on a video that
+    /// plays fine in a browser. The <c>bv*+ba</c> fallbacks let yt-dlp pick the streams apart and
+    /// merge them; ffmpeg ships next to the yt-dlp binary, where yt-dlp finds it unaided.
+    /// </summary>
+    internal const string FormatSelector = "best[ext=mp4]/bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/best";
+
     private readonly YoutubeDL _ytdl;
     private readonly YtDlpOptions _options;
     private readonly ILogger<YtDlpPlatformExtractor> _logger;
@@ -149,9 +159,9 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
             // (a homepage, a blog) that merely embeds a YouTube video, where yt-dlp reaches the
             // video only through its generic extractor and hands back nothing but storyboard
             // frames (protocol=mhtml, vcodec=none, acodec=none) — formats that exist but can't
-            // be played. Both must surface as text-only; pushing storyboards into a
-            // "best[ext=mp4]/best" download always ends in "No video formats found", a hard
-            // ToolFailure that lands in the journal for what was never a real media post.
+            // be played. Both must surface as text-only; pushing storyboards into any format
+            // selection always ends in "No video formats found", a hard ToolFailure that lands
+            // in the journal for what was never a real media post.
             if (!HasPlayableMedia(info.Formats))
             {
                 _logger.LogInformation(
@@ -161,15 +171,11 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
                     new MediaPayload(url, info.Title, info.Uploader, [], info.Description));
             }
 
-            // Prefer a pre-merged single-file format so we don't need ffmpeg to glue DASH
-            // video and audio streams (Instagram and some other platforms only expose DASH;
-            // without this selector yt-dlp grabs both streams and then "succeeds" with no
-            // merged file present on disk).
             var download = await WithTransientRetryAsync(
                 url,
                 token => _ytdl.RunVideoDownload(
                     sanitisedUrl,
-                    format: "best[ext=mp4]/best",
+                    format: FormatSelector,
                     ct: token,
                     overrideOptions: optionSet),
                 cancellationToken);
@@ -252,6 +258,10 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
         // with empty formats) make yt-dlp fail metadata fetch entirely. We'd rather get
         // the title and description back and surface them as a text reply than swallow
         // them with a hard failure.
+        // When the selector falls through to a DASH pair, the merge target has to be mp4:
+        // yt-dlp otherwise picks a container from the streams and can hand back an mkv, which
+        // Telegram uploads as a file attachment instead of playing it inline.
+        opts.MergeOutputFormat = DownloadMergeFormat.Mp4;
         opts.AddCustomOption("--ignore-no-formats-error", true);
         // Strip emoji and other non-ASCII characters from output filenames. yt-dlp's
         // captured-filename reporting (what YoutubeDLSharp parses into RunResult.Data)
@@ -309,7 +319,7 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
             url,
             token => _ytdl.RunVideoPlaylistDownload(
                 sanitisedUrl,
-                format: "best[ext=mp4]/best",
+                format: FormatSelector,
                 ct: token,
                 overrideOptions: optionSet),
             cancellationToken);
