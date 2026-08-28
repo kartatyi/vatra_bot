@@ -111,7 +111,12 @@ start the whole cycle again.
 Only when the failure is a genuine defect in our code and you can state the root cause in
 one sentence.
 
-1. Branch: `git checkout -b fix/watchdog-<short-slug>`.
+1. Branch **off the branch this deployment is built from**, never off whatever HEAD happens
+   to be: read the branch name from `<StateDir>\deploy-source.txt` (one line) and run
+   `git checkout -b fix/watchdog-<short-slug> <that branch>`; fall back to `main` only when
+   the file is absent. A deployment can carry local-only features that no other branch has,
+   and a build from the wrong branch drops them **without a single error in the log** — the
+   bot keeps reposting while the feature silently stops working.
 2. Make the smallest change that fixes the cause. Follow `CLAUDE.md`: `Result<>` over
    exceptions, structured logging, injected `TimeProvider`, no PII above `Debug`.
 3. Cover it with a test. A fix with no test does not ship.
@@ -147,6 +152,10 @@ report, and let a human look. A bad diagnosis must never turn into a restart loo
    show a Telegram `409 Conflict`. If it does not, **roll back**: restore the backup exe
    the same disable → swap → enable way, confirm it is online, and report the rollback as
    the headline of your report.
+   **Prove nothing went missing, too:** every startup line the previous build logged must
+   still be logged, and every table the previous build was writing to must still take new
+   rows after the swap. A table that goes quiet is a lost feature, not a quiet day — roll
+   back the same way.
    **Whatever happens, the task must end up enabled.** A deploy that leaves it disabled
    leaves the bot unsupervised, which is worse than the bug you were fixing.
 6. Append the deploy (or the rollback) to `autopilot.json` with the run id and commit sha.
