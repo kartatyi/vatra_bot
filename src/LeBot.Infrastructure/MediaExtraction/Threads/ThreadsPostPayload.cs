@@ -15,11 +15,24 @@ namespace LeBot.Infrastructure.MediaExtraction.Threads;
 ///
 /// A page carries many posts (replies, recommendations), so the node is matched on the post's own
 /// shortcode — never "the first media-looking thing on the page".
+///
+/// A post's media isn't always on its own node. A text post that shares a reel, or quotes someone
+/// else's photo, keeps its own renditions empty and carries the other post as a full media node
+/// under <c>text_post_app_info</c>. Those attachments are the post's media. Whatever the page claims
+/// and this class can't read is reported as such (<see cref="ThreadsPost.UnreadAttachments"/>)
+/// instead of being passed off as a text-only post.
 /// </summary>
 internal static partial class ThreadsPostPayload
 {
     // Guards against a pathological payload spinning the walk; real nodes sit ~25 levels deep.
     private const int MaxDepth = 60;
+
+    // A quote of a quote of a reel is as deep as anyone writes; past that, stop following.
+    private const int MaxAttachmentDepth = 3;
+
+    // Threads' media_type for a post that is text. Every other value claims a picture, a clip or a
+    // carousel — even when the renditions on the node turn out empty.
+    private const int TextPostMediaType = 19;
 
     [GeneratedRegex(
         """<script type="application/json"[^>]*>(.*?)</script>""",
@@ -149,16 +162,48 @@ internal static partial class ThreadsPostPayload
             || element.TryGetProperty("image_versions2", out _)
             || element.TryGetProperty("video_versions", out _));
 
-    private static ThreadsPost Describe(JsonElement post) =>
-        new(Author: TryGetString(post, "user", "username"),
-            Caption: TryGetString(post, "caption", "text"),
-            Media: CollectMedia(post),
-            Continuation: []);
+    private static ThreadsPost Describe(JsonElement post)
+    {
+        var media = CollectMedia(post, depth: 0);
+        return new ThreadsPost(
+            Author: TryGetString(post, "user", "username"),
+            Caption: ComposeCaption(post),
+            Media: media,
+            Continuation: [])
+        {
+            UnreadAttachments = media.Count > 0 ? [] : UnreadAttachmentsOf(post),
+        };
+    }
 
-    private static List<ThreadsMediaSource> CollectMedia(JsonElement post)
+    /// <summary>
+    /// The post's media: its own renditions first and, when it has none, the post it shares or
+    /// quotes — Threads keeps a shared reel or a quoted photo one level down, on a node shaped
+    /// exactly like a post.
+    /// </summary>
+    private static List<ThreadsMediaSource> CollectMedia(JsonElement post, int depth)
+    {
+        var media = OwnMedia(post);
+        if (media.Count > 0 || depth >= MaxAttachmentDepth)
+        {
+            return media;
+        }
+
+        foreach (var (_, attachment) in Attachments(post))
+        {
+            media = CollectMedia(attachment, depth + 1);
+            if (media.Count > 0)
+            {
+                break;
+            }
+        }
+
+        return media;
+    }
+
+    private static List<ThreadsMediaSource> OwnMedia(JsonElement node)
     {
         var media = new List<ThreadsMediaSource>();
-        if (post.TryGetProperty("carousel_media", out var carousel)
+        if (node.TryGetProperty("carousel_media", out var carousel)
             && carousel.ValueKind == JsonValueKind.Array)
         {
             foreach (var child in carousel.EnumerateArray())
@@ -171,10 +216,113 @@ internal static partial class ThreadsPostPayload
         // first child's image there, so only look when the carousel yielded nothing.
         if (media.Count == 0)
         {
-            AddSource(post, media);
+            AddSource(node, media);
         }
 
         return media;
+    }
+
+    /// <summary>
+    /// The author's words, with the quoted post's words underneath when there is one — a quote
+    /// without what it quotes reads as a non sequitur.
+    /// </summary>
+    private static string? ComposeCaption(JsonElement post)
+    {
+        var own = TryGetString(post, "caption", "text");
+        if (!TryGetObject(post, "text_post_app_info", out var info)
+            || !TryGetObject(info, "share_info", out var share)
+            || !TryGetObject(share, "quoted_post", out var quoted)
+            || TryGetString(quoted, "caption", "text") is not { } quotedText)
+        {
+            return own;
+        }
+
+        var quote = TryGetString(quoted, "user", "username") is { } quotedAuthor
+            ? $"↩ @{quotedAuthor}: {quotedText}"
+            : $"↩ {quotedText}";
+
+        return own is null ? quote : $"{own}\n\n{quote}";
+    }
+
+    /// <summary>
+    /// Names what a media-less node still claims to carry, so the extractor can refuse the card and
+    /// the log can say which shape the parser has to learn. Only meaningful when nothing was read.
+    /// </summary>
+    private static List<string> UnreadAttachmentsOf(JsonElement post)
+    {
+        var unread = new List<string>();
+        if (MediaTypeOf(post) is { } mediaType && mediaType != TextPostMediaType)
+        {
+            unread.Add($"media_type {mediaType}");
+        }
+
+        if (TryGetObject(post, "giphy_media_info", out _))
+        {
+            unread.Add("giphy_media_info");
+        }
+
+        foreach (var (name, attachment) in Attachments(post))
+        {
+            // A quoted text post is still text; only an attachment that itself claims media counts.
+            if (ClaimsMedia(attachment, depth: 1))
+            {
+                unread.Add(name);
+            }
+        }
+
+        return unread;
+    }
+
+    private static bool ClaimsMedia(JsonElement node, int depth)
+    {
+        if (MediaTypeOf(node) is { } mediaType && mediaType != TextPostMediaType)
+        {
+            return true;
+        }
+
+        if (TryGetObject(node, "giphy_media_info", out _))
+        {
+            return true;
+        }
+
+        return depth < MaxAttachmentDepth
+            && Attachments(node).Any(attachment => ClaimsMedia(attachment.Node, depth + 1));
+    }
+
+    private static int? MediaTypeOf(JsonElement node) =>
+        node.TryGetProperty("media_type", out var type)
+        && type.ValueKind == JsonValueKind.Number
+        && type.TryGetInt32(out var mediaType)
+            ? mediaType
+            : null;
+
+    /// <summary>The other posts this one carries: a reel shared inline, a quoted post, a repost.</summary>
+    private static IEnumerable<(string Name, JsonElement Node)> Attachments(JsonElement post)
+    {
+        if (!TryGetObject(post, "text_post_app_info", out var info))
+        {
+            yield break;
+        }
+
+        if (TryGetObject(info, "linked_inline_media", out var inline))
+        {
+            yield return ("linked_inline_media", inline);
+        }
+
+        if (!TryGetObject(info, "share_info", out var share))
+        {
+            yield break;
+        }
+
+        if (TryGetObject(share, "quoted_post", out var quoted))
+        {
+            yield return ("quoted_post", quoted);
+        }
+
+        if (TryGetObject(share, "reposted_post", out var reposted))
+        {
+            yield return ("reposted_post", reposted);
+        }
     }
 
     /// <summary>
@@ -184,7 +332,7 @@ internal static partial class ThreadsPostPayload
     /// <em>and</em> replies <em>to</em> the author continues the thread; the first item that isn't
     /// ends it, which is what keeps the comment section out of the chat.
     /// </summary>
-    private static IReadOnlyList<ThreadsPostPart> FindContinuation(
+    private static List<ThreadsPostPart> FindContinuation(
         JsonElement root,
         string shortcode,
         string? author)
@@ -236,8 +384,8 @@ internal static partial class ThreadsPostPayload
 
         for (var i = linked + 1; i < conversation.Count && ContinuesTheThread(conversation[i], author); i++)
         {
-            var text = TryGetString(conversation[i], "caption", "text");
-            var media = CollectMedia(conversation[i]);
+            var text = ComposeCaption(conversation[i]);
+            var media = CollectMedia(conversation[i], depth: 0);
             if (text is not null || media.Count > 0)
             {
                 parts.Add(new ThreadsPostPart(text, media));
@@ -301,8 +449,7 @@ internal static partial class ThreadsPostPayload
         && string.Equals(ReplyTarget(post), author, StringComparison.Ordinal);
 
     private static string? ReplyTarget(JsonElement post) =>
-        post.TryGetProperty("text_post_app_info", out var info)
-        && info.ValueKind == JsonValueKind.Object
+        TryGetObject(post, "text_post_app_info", out var info)
             ? TryGetString(info, "reply_to_author", "username")
             : null;
 
@@ -377,11 +524,13 @@ internal static partial class ThreadsPostPayload
             : 0;
 
     private static string? TryGetString(JsonElement parent, string objectName, string property) =>
-        parent.TryGetProperty(objectName, out var child)
-        && child.ValueKind == JsonValueKind.Object
+        TryGetObject(parent, objectName, out var child)
         && child.TryGetProperty(property, out var value)
         && value.ValueKind == JsonValueKind.String
         && value.GetString() is { Length: > 0 } text
             ? text
             : null;
+
+    private static bool TryGetObject(JsonElement parent, string name, out JsonElement child) =>
+        parent.TryGetProperty(name, out child) && child.ValueKind == JsonValueKind.Object;
 }
