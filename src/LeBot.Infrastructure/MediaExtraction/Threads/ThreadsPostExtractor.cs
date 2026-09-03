@@ -11,12 +11,14 @@ using Polly.Retry;
 namespace LeBot.Infrastructure.MediaExtraction.Threads;
 
 /// <summary>
-/// Reposts a Threads post as the media it actually contains — every photo of a carousel, the real
-/// clip of a video post, the author's own caption — by reading the payload the page ships with
-/// itself (see <see cref="ThreadsPostPayload"/>).
+/// Reposts a Threads post as what it actually contains — every photo of a carousel, the real clip
+/// of a video post, the reel it shares or the photo it quotes, the author's own caption — by reading
+/// the payload the page ships with itself (see <see cref="ThreadsPostPayload"/>).
 ///
-/// It runs ahead of <c>ThreadsEmbedExtractor</c> and declines whenever it can't describe the post,
-/// so a text-only post still falls through to the og:image card Threads renders the body text into.
+/// It is the only Threads extractor, and it never guesses. A post that is words and nothing else
+/// goes out as the card Threads renders for crawlers, which is the post. A post the page describes
+/// but the parser can't read fails — loudly, naming the shape — instead of going out as that card,
+/// because for anything but text the card is a collage of the post, not the post.
 /// </summary>
 internal sealed class ThreadsPostExtractor : IPlatformExtractor
 {
@@ -48,6 +50,7 @@ internal sealed class ThreadsPostExtractor : IPlatformExtractor
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IBrowserPayloadLoader _browserLoader;
+    private readonly IThreadsCardLoader _cardLoader;
     private readonly YtDlpOptions _options;
     private readonly ILogger<ThreadsPostExtractor> _logger;
     private readonly ResiliencePipeline<HttpResponseMessage> _retryPipeline;
@@ -55,11 +58,13 @@ internal sealed class ThreadsPostExtractor : IPlatformExtractor
     public ThreadsPostExtractor(
         IHttpClientFactory httpClientFactory,
         IBrowserPayloadLoader browserLoader,
+        IThreadsCardLoader cardLoader,
         IOptions<YtDlpOptions> options,
         ILogger<ThreadsPostExtractor> logger)
     {
         _httpClientFactory = httpClientFactory;
         _browserLoader = browserLoader;
+        _cardLoader = cardLoader;
         _options = options.Value;
         _logger = logger;
 
@@ -98,13 +103,27 @@ internal sealed class ThreadsPostExtractor : IPlatformExtractor
     {
         try
         {
-            var post = await LoadPostAsync(url, cancellationToken);
-            if (post is null || post.Media.Count == 0)
+            var lookup = await LoadPostAsync(url, cancellationToken);
+            if (lookup.Post is not { } post)
             {
-                // Either the page never described the post, or it's text-only. Both are the embed
-                // extractor's case: it renders the body as Threads' own card.
-                _logger.LogDebug("No post media described for {Url}; leaving it to the og:image card", url);
-                return Result<MediaPayload, ExtractionError>.Failure(new ExtractionError.UnsupportedPlatform(url));
+                return Unavailable(url, lookup.Missing);
+            }
+
+            if (post.IsTextOnly)
+            {
+                return await RepostAsCardAsync(url, post, cancellationToken);
+            }
+
+            if (post.Media.Count == 0)
+            {
+                // The page says there is something here and the parser found no media in it. The card
+                // would render that something into a collage — a picture of the post, not the post —
+                // so this fails on purpose: the journal row is how the next shape gets a reader.
+                var attachments = string.Join(", ", post.UnreadAttachments);
+                _logger.LogWarning(
+                    "Threads post {Url} carries an attachment the parser can't read ({Attachments}); refusing the og:image card",
+                    url, attachments);
+                return Unavailable(url, $"attachment the parser can't read: {attachments}");
             }
 
             var items = await DownloadAllAsync(post.Media, cancellationToken);
@@ -112,7 +131,7 @@ internal sealed class ThreadsPostExtractor : IPlatformExtractor
             {
                 _logger.LogWarning(
                     "Threads post {Url} listed {Count} media but downloaded zero", url, post.Media.Count);
-                return Result<MediaPayload, ExtractionError>.Failure(new ExtractionError.UnsupportedPlatform(url));
+                return Unavailable(url, $"{post.Media.Count} media listed, none downloaded");
             }
 
             var followUps = await DownloadContinuationAsync(post, cancellationToken);
@@ -141,11 +160,43 @@ internal sealed class ThreadsPostExtractor : IPlatformExtractor
     }
 
     /// <summary>
+    /// A text-only post goes out as the card Threads renders for it, with the author's words as the
+    /// caption. No card is not a failure: the words are the post, and they still go.
+    /// </summary>
+    private async Task<Result<MediaPayload, ExtractionError>> RepostAsCardAsync(
+        Uri url,
+        ThreadsPost post,
+        CancellationToken cancellationToken)
+    {
+        var card = await _cardLoader.LoadAsync(url, cancellationToken);
+        if (card is null)
+        {
+            _logger.LogInformation("Threads offered no card for text-only {Url}; reposting its text alone", url);
+        }
+
+        var followUps = await DownloadContinuationAsync(post, cancellationToken);
+
+        return Result<MediaPayload, ExtractionError>.Success(
+            new MediaPayload(
+                url,
+                Title: null,
+                Author: post.Author,
+                Items: card is null ? [] : [card],
+                Description: post.Caption)
+            {
+                FollowUps = followUps,
+            });
+    }
+
+    private static Result<MediaPayload, ExtractionError> Unavailable(Uri url, string detail) =>
+        Result<MediaPayload, ExtractionError>.Failure(new ExtractionError.ContentUnavailable(url, detail));
+
+    /// <summary>
     /// Fetches the page and reads the post out of it. Meta sometimes answers with the logged-out
     /// shell (or bounces the request to the home feed) instead of the payload, so a miss escalates:
-    /// plain fetch, then the headless browser, then give up.
+    /// plain fetch, then the headless browser, then give up — saying why.
     /// </summary>
-    private async Task<ThreadsPost?> LoadPostAsync(Uri url, CancellationToken cancellationToken)
+    private async Task<PostLookup> LoadPostAsync(Uri url, CancellationToken cancellationToken)
     {
         var (finalUrl, html) = await FetchPageAsync(url, cancellationToken);
 
@@ -155,20 +206,23 @@ internal sealed class ThreadsPostExtractor : IPlatformExtractor
         {
             // Deleted or private posts land on the home feed or ?error=invalid_post.
             _logger.LogInformation("Threads did not resolve {Url} to a post page", url);
-            return null;
+            return PostLookup.NotFound("the page did not resolve to a post (deleted, private, or not a post link)");
         }
 
         var post = html is null ? null : ThreadsPostPayload.FromHtml(html, shortcode);
         if (post is not null)
         {
-            return post;
+            return PostLookup.Found(post);
         }
 
         _logger.LogInformation(
             "Threads served no payload for {Shortcode} over HTTP; retrying in a headless browser", shortcode);
 
         var payload = await _browserLoader.LoadPostPayloadAsync(finalUrl, shortcode, cancellationToken);
-        return payload is null ? null : ThreadsPostPayload.FromJson(payload, shortcode);
+        post = payload is null ? null : ThreadsPostPayload.FromJson(payload, shortcode);
+        return post is null
+            ? PostLookup.NotFound("the page never described the post, over HTTP or in the headless browser")
+            : PostLookup.Found(post);
     }
 
     private async Task<(Uri FinalUrl, string? Html)> FetchPageAsync(Uri url, CancellationToken cancellationToken)
@@ -395,5 +449,13 @@ internal sealed class ThreadsPostExtractor : IPlatformExtractor
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
+    }
+
+    /// <summary>Either the post the page described, or the reason it didn't.</summary>
+    private sealed record PostLookup(ThreadsPost? Post, string Missing)
+    {
+        public static PostLookup Found(ThreadsPost post) => new(post, string.Empty);
+
+        public static PostLookup NotFound(string missing) => new(null, missing);
     }
 }

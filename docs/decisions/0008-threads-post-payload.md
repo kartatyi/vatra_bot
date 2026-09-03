@@ -1,7 +1,7 @@
 # 0008. Threads Media from the Post's Own Payload
 
 Date: 2026-08-06
-Status: Accepted
+Status: Accepted (Decision 3 superseded by 0010)
 
 ## Context
 
@@ -40,6 +40,8 @@ One fetch in ten still comes back as the shell (Meta bounces it to the home feed
 The browser is still optional: no Chromium, `Threads:BrowserFallbackEnabled=false`, or any failure means that one post degrades to the og:image card. It is no longer on the path of the common case, so the 25&#160;s timeout a photo post used to burn (waiting for a `<video>` that would never come) is gone.
 
 ### Decision 3 — The og:image card stays, for text-only posts
+
+> **Superseded by [ADR 0010](0010-threads-attachments-and-honest-cards.md).** The card is still reserved for text-only posts, but that is now decided from the payload inside `ThreadsPostExtractor`; `ThreadsEmbedExtractor` is gone, and a post the parser can't read fails instead of falling through to the card.
 
 `ThreadsPostExtractor` declines (`UnsupportedPlatform`) when the post has no media, so `ThreadsEmbedExtractor` still answers text-only posts. For those the card is not a lie — Threads renders the body text into it, which is exactly what the chat wants to see. Order: `InstagramApi → ThreadsPost → ThreadsEmbed → YtDlp`.
 

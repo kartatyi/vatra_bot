@@ -53,6 +53,36 @@ public class ThreadsPostExtractorTests
         Cleanup(payload);
     }
 
+    // The regression: a text post sharing a reel went out as the og:image collage. The reel is the
+    // post's media, and the card must not be asked for.
+    [Fact]
+    public async Task ExtractAsync_InlineMediaPost_ReturnsTheAttachedClipNotTheCard()
+    {
+        var card = CardReturning(CardFile());
+        var sut = CreateSut(Serving(Fixture("inline-media-post.html")), card: card);
+
+        var result = await sut.ExtractAsync(Post("DbInlineReel"), CancellationToken.None);
+
+        var payload = Ok(result);
+        payload.Items.Should().ContainSingle().Which.Kind.Should().Be(MediaKind.Video);
+        payload.Description.Should().Be("😍");
+        await card.DidNotReceive().LoadAsync(Arg.Any<Uri>(), Arg.Any<CancellationToken>());
+        Cleanup(payload);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_QuotedPost_ReturnsTheQuotedPhotoUnderTheAuthorsWords()
+    {
+        var sut = CreateSut(Serving(Fixture("quoted-post.html")));
+
+        var result = await sut.ExtractAsync(Post("DbQuoteTop"), CancellationToken.None);
+
+        var payload = Ok(result);
+        payload.Items.Should().ContainSingle().Which.Kind.Should().Be(MediaKind.Photo);
+        payload.Description.Should().StartWith("this aged well").And.Contain("@original.poster");
+        Cleanup(payload);
+    }
+
     [Fact]
     public async Task ExtractAsync_ChainedPost_CarriesEveryPartAsAFollowUp()
     {
@@ -94,14 +124,46 @@ public class ThreadsPostExtractorTests
         Cleanup(payload);
     }
 
+    // Words and nothing else: the card Threads renders *is* the post, so it goes out as the photo,
+    // with the words themselves as the caption.
     [Fact]
-    public async Task ExtractAsync_TextOnlyPost_ReturnsUnsupportedSoTheCardCanServeIt()
+    public async Task ExtractAsync_TextOnlyPost_RepostsTheCardWithTheAuthorsWords()
     {
-        var sut = CreateSut(Serving(Fixture("text-post.html")));
+        var sut = CreateSut(Serving(Fixture("text-post.html")), card: CardReturning(CardFile()));
 
         var result = await sut.ExtractAsync(Post("DbTextOnly1"), CancellationToken.None);
 
-        Declined(result);
+        var payload = Ok(result);
+        payload.Items.Should().ContainSingle().Which.Kind.Should().Be(MediaKind.Photo);
+        payload.Author.Should().Be("xvylka");
+        payload.Description.Should().Be("no pictures, just opinions");
+        Cleanup(payload);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_TextOnlyPostWithoutACard_RepostsTheWordsAlone()
+    {
+        var sut = CreateSut(Serving(Fixture("text-post.html")), card: CardReturning(null));
+
+        var result = await sut.ExtractAsync(Post("DbTextOnly1"), CancellationToken.None);
+
+        var payload = Ok(result);
+        payload.Items.Should().BeEmpty();
+        payload.Description.Should().Be("no pictures, just opinions");
+    }
+
+    // The page describes an attachment the parser has no reader for. The card would be a collage
+    // of it; a failure naming the shape is what gets it a reader.
+    [Fact]
+    public async Task ExtractAsync_UnreadableAttachment_FailsInsteadOfServingTheCard()
+    {
+        var card = CardReturning(CardFile());
+        var sut = CreateSut(Serving(Fixture("unreadable-attachment-post.html")), card: card);
+
+        var result = await sut.ExtractAsync(Post("DbGifOnly01"), CancellationToken.None);
+
+        Unavailable(result).Detail.Should().Contain("giphy_media_info");
+        await card.DidNotReceive().LoadAsync(Arg.Any<Uri>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -117,28 +179,47 @@ public class ThreadsPostExtractorTests
         Cleanup(payload);
     }
 
+    // No description of the post anywhere means no way to know whether the card is honest — so
+    // no card, and a failure the journal can show.
     [Fact]
-    public async Task ExtractAsync_NoBrowserEither_ReturnsUnsupported()
+    public async Task ExtractAsync_NoBrowserEither_FailsWithoutTouchingTheCard()
     {
-        var sut = CreateSut(Serving(page: "<html><body>logged-out shell</body></html>"), BrowserReturning(null));
+        var card = CardReturning(CardFile());
+        var sut = CreateSut(
+            Serving(page: "<html><body>logged-out shell</body></html>"), BrowserReturning(null), card);
 
         var result = await sut.ExtractAsync(Post("DbnWztIiMQa"), CancellationToken.None);
 
-        Declined(result);
+        Unavailable(result);
+        await card.DidNotReceive().LoadAsync(Arg.Any<Uri>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task ExtractAsync_PageUnavailable_ReturnsUnsupported()
+    public async Task ExtractAsync_PageUnavailable_FailsAsContentUnavailable()
     {
         var sut = CreateSut(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
 
         var result = await sut.ExtractAsync(Post("DbnWztIiMQa"), CancellationToken.None);
 
-        Declined(result);
+        Unavailable(result);
+    }
+
+    // A deleted or private post bounces to the home feed. The feed's og:image is not the post.
+    [Fact]
+    public async Task ExtractAsync_LinkBouncedOffAPostPage_FailsWithoutTouchingTheCard()
+    {
+        var card = CardReturning(CardFile());
+        var feed = new Uri("https://www.threads.com/?error=invalid_post");
+        var sut = CreateSut(Serving(page: "<html><body>home feed</body></html>", redirectedTo: feed), card: card);
+
+        var result = await sut.ExtractAsync(new Uri("https://www.threads.com/share/BAYBI9yu9Y/"), CancellationToken.None);
+
+        Unavailable(result).Detail.Should().Contain("did not resolve to a post");
+        await card.DidNotReceive().LoadAsync(Arg.Any<Uri>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task ExtractAsync_MediaExceedsSizeLimit_ReturnsUnsupported()
+    public async Task ExtractAsync_MediaExceedsSizeLimit_FailsAsContentUnavailable()
     {
         var sut = CreateSut(
             request => IsPageRequest(request)
@@ -148,7 +229,7 @@ public class ThreadsPostExtractorTests
 
         var result = await sut.ExtractAsync(Post("DbnWztIiMQa"), CancellationToken.None);
 
-        Declined(result);
+        Unavailable(result).Detail.Should().Contain("none downloaded");
     }
 
     private static Uri Post(string shortcode) => new($"https://www.threads.com/@someone/post/{shortcode}");
@@ -156,9 +237,9 @@ public class ThreadsPostExtractorTests
     private static MediaPayload Ok(Result<MediaPayload, ExtractionError> result) =>
         result.Should().BeOfType<Result<MediaPayload, ExtractionError>.Ok>().Subject.Value;
 
-    private static void Declined(Result<MediaPayload, ExtractionError> result) =>
+    private static ExtractionError.ContentUnavailable Unavailable(Result<MediaPayload, ExtractionError> result) =>
         result.Should().BeOfType<Result<MediaPayload, ExtractionError>.Err>()
-            .Which.Error.Should().BeOfType<ExtractionError.UnsupportedPlatform>();
+            .Which.Error.Should().BeOfType<ExtractionError.ContentUnavailable>().Subject;
 
     private static bool IsPageRequest(HttpRequestMessage request) =>
         request.RequestUri!.Host.EndsWith("threads.com", StringComparison.Ordinal);
@@ -212,6 +293,23 @@ public class ThreadsPostExtractorTests
         return loader;
     }
 
+    private static IThreadsCardLoader CardReturning(MediaItem? card)
+    {
+        var loader = Substitute.For<IThreadsCardLoader>();
+        loader.LoadAsync(Arg.Any<Uri>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(card));
+        return loader;
+    }
+
+    /// <summary>A stand-in for the downloaded og:image — a real file, so the cleanup path is exercised too.</summary>
+    private static MediaItem CardFile()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "lebot-tests-threads");
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, $"card_{Guid.NewGuid():N}.jpg");
+        File.WriteAllBytes(path, [0xFF, 0xD8, 0xFF]);
+        return new MediaItem(path, MediaKind.Photo, "image/jpeg", SizeBytes: 3, DurationSeconds: null);
+    }
+
     /// <summary>The single JSON block the browser fallback hands back, lifted out of a fixture page.</summary>
     private static string PayloadBlockOf(string html)
     {
@@ -223,6 +321,7 @@ public class ThreadsPostExtractorTests
     private static ThreadsPostExtractor CreateSut(
         Func<HttpRequestMessage, HttpResponseMessage> respond,
         IBrowserPayloadLoader? browser = null,
+        IThreadsCardLoader? card = null,
         int maxFileSizeMb = 50)
     {
         var factory = Substitute.For<IHttpClientFactory>();
@@ -237,6 +336,7 @@ public class ThreadsPostExtractorTests
         return new ThreadsPostExtractor(
             factory,
             browser ?? BrowserReturning(null),
+            card ?? CardReturning(null),
             options,
             NullLogger<ThreadsPostExtractor>.Instance);
     }
