@@ -126,9 +126,13 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
                 }
             }
 
+            // Media facts come from the video itself; the caption stays page-level, like the
+            // playlist path — a lone Steam trailer is titled "YAPYAP video 1", its page "YAPYAP".
+            var video = UnwrapSoleEntry(info);
+
             var maxBytes = (long)_options.MaxFileSizeMb * 1024 * 1024;
 
-            var predictedSize = info.Formats?
+            var predictedSize = video.Formats?
                 .Select(f => f.FileSize ?? f.ApproximateFileSize)
                 .OfType<long>()
                 .DefaultIfEmpty(0L)
@@ -147,7 +151,7 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
             // downloadable formats at all — Instagram image carousels and text-only Threads
             // posts shaped as single entries are the usual culprit. Surface the metadata as
             // text-only rather than burning a download attempt that always 404s.
-            if (info.Formats is null or { Length: 0 })
+            if (video.Formats is null or { Length: 0 })
             {
                 _logger.LogInformation(
                     "Skipping {Url}: yt-dlp returned no downloadable formats — surfacing text only",
@@ -200,7 +204,7 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
                 Kind: DetermineKind(filePath),
                 MimeType: GuessMimeType(filePath),
                 SizeBytes: fileInfo.Length,
-                DurationSeconds: info.Duration is { } d ? (int)d : null);
+                DurationSeconds: video.Duration is { } d ? (int)d : null);
 
             return Result<MediaPayload, ExtractionError>.Success(
                 new MediaPayload(url, info.Title, info.Uploader, [item], info.Description));
@@ -349,6 +353,15 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
         return Result<MediaPayload, ExtractionError>.Success(
             new MediaPayload(url, info.Title, info.Uploader, items, info.Description));
     }
+
+    /// <summary>
+    /// The node that describes the one video a single download fetches. yt-dlp wraps some
+    /// single videos in a one-entry playlist (Steam store pages, for one), and the playlist
+    /// node has no formats or duration of its own — reading it makes a playable video look
+    /// like a text-only post. Anything but exactly one entry comes back unchanged.
+    /// </summary>
+    internal static YoutubeDLSharp.Metadata.VideoData UnwrapSoleEntry(YoutubeDLSharp.Metadata.VideoData info) =>
+        info.Entries is [var sole] ? sole : info;
 
     private static bool AllEntriesHaveNoFormats(YoutubeDLSharp.Metadata.VideoData[] entries)
     {
