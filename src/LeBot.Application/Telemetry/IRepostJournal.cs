@@ -20,6 +20,12 @@ public interface IRepostJournal
     /// <summary>An extractor that claimed the URL failed hard; <paramref name="extractionError"/> carries the why.</summary>
     Task RecordFailureAsync(Uri url, string extractor, ExtractionError extractionError, TimeSpan elapsed, long chatId, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// The extractor delivered media but Telegram never took it; <paramref name="deliveryError"/> carries the why.
+    /// Stored as a <see cref="RepostOutcome.Failure"/> so it reaches the same alerting as a broken extractor.
+    /// </summary>
+    Task RecordDeliveryFailureAsync(Uri url, string extractor, DeliveryError deliveryError, TimeSpan elapsed, long chatId, CancellationToken cancellationToken);
+
     /// <summary>An extractor claimed the URL but produced an empty payload.</summary>
     Task RecordNothingExtractedAsync(Uri url, string extractor, TimeSpan elapsed, long chatId, CancellationToken cancellationToken);
 

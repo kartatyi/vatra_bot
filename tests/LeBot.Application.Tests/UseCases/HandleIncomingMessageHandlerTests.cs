@@ -511,6 +511,82 @@ public class HandleIncomingMessageHandlerTests
     }
 
     [Fact]
+    public async Task HandleAsync_MediaNotDelivered_JournalsDeliveryFailureInsteadOfRepost()
+    {
+        var url = new Uri("https://store.steampowered.com/app/1/");
+        var item = new MediaItem("/tmp/x.mp4", MediaKind.Video, "video/mp4", 100, 5);
+        var payload = new MediaPayload(url, "title", null, [item]);
+        var error = new DeliveryError.TelegramUnreachable("connection reset");
+
+        _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
+        _extractor.CanHandle(url).Returns(true);
+        _extractor.ExtractAsync(url, Arg.Any<CancellationToken>())
+            .Returns(Result<MediaPayload, ExtractionError>.Success(payload));
+        _messenger.ReplyWithMediaAsync(123L, 7, payload, Arg.Any<CancellationToken>())
+            .Returns(error);
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        // The watchdog polls Failure rows only; a repost row here would hide the upload that never arrived.
+        await _journal.Received(1).RecordDeliveryFailureAsync(
+            url, _extractor.GetType().Name, error, Arg.Any<TimeSpan>(), 123L, Arg.Any<CancellationToken>());
+        await _journal.DidNotReceiveWithAnyArgs().RecordMediaRepostAsync(default!, default!, default, default, default, default, default);
+        _metrics.Failures.Should().Be(1);
+        _metrics.MediaReposts.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task HandleAsync_MediaNotDelivered_DoesNotTryTheNextExtractor()
+    {
+        var url = new Uri("https://example.com/x");
+        var item = new MediaItem("/tmp/x.mp4", MediaKind.Video, "video/mp4", 100, 5);
+        var payload = new MediaPayload(url, "title", null, [item]);
+
+        var first = Substitute.For<IPlatformExtractor>();
+        first.CanHandle(url).Returns(true);
+        first.ExtractAsync(url, Arg.Any<CancellationToken>())
+            .Returns(Result<MediaPayload, ExtractionError>.Success(payload));
+
+        var second = Substitute.For<IPlatformExtractor>();
+        second.CanHandle(url).Returns(true);
+
+        _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
+        _messenger.ReplyWithMediaAsync(123L, 7, payload, Arg.Any<CancellationToken>())
+            .Returns(new DeliveryError.TelegramRefused(400, "file is too big"));
+
+        var sut = new HandleIncomingMessageHandler(_urlExtractor, [first, second], _cache, _messenger, _metrics, _journal, _time, _logger);
+        await sut.HandleAsync(Message(), CancellationToken.None);
+
+        // The chat already holds the source link; a second extractor would only repeat the upload.
+        await second.DidNotReceiveWithAnyArgs().ExtractAsync(default!, default);
+        await _messenger.Received(1).ReplyWithMediaAsync(
+            Arg.Any<long>(), Arg.Any<int>(), Arg.Any<MediaPayload>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleAsync_CachedMediaNotDelivered_JournalsDeliveryFailureWithoutExtracting()
+    {
+        var url = new Uri("https://tiktok.com/@user/video/1");
+        var item = new MediaItem("/cache/ab/00.mp4", MediaKind.Video, "video/mp4", 100, 5);
+        var stored = new MediaPayload(url, null, "user", [item], "body", RetainFiles: true);
+        var error = new DeliveryError.TelegramUnreachable("connection reset");
+
+        _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
+        _extractor.CanHandle(url).Returns(true);
+        _cache.TryGetAsync(url, Arg.Any<CancellationToken>())
+            .Returns(new CachedRepost(stored, "YtDlpPlatformExtractor"));
+        _messenger.ReplyWithMediaAsync(123L, 7, stored, Arg.Any<CancellationToken>())
+            .Returns(error);
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        await _journal.Received(1).RecordDeliveryFailureAsync(
+            url, "MediaCache", error, Arg.Any<TimeSpan>(), 123L, Arg.Any<CancellationToken>());
+        await _extractor.DidNotReceiveWithAnyArgs().ExtractAsync(default!, default);
+        _metrics.CacheHits.Should().Be(0);
+    }
+
+    [Fact]
     public async Task HandleAsync_NoMediaButDescription_JournalsTextFallback()
     {
         var url = new Uri("https://example.com/x");

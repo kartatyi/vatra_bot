@@ -14,7 +14,10 @@ public enum RepostOutcome
     /// <summary>No media, but the post's title/description was sent as a text reply.</summary>
     TextFallback,
 
-    /// <summary>An extractor that claimed the URL reported a hard error (the "why it breaks" signal).</summary>
+    /// <summary>
+    /// An extractor that claimed the URL reported a hard error, or its media never made it into Telegram
+    /// (the "why it breaks" signal).
+    /// </summary>
     Failure,
 
     /// <summary>An extractor claimed the URL but produced an empty payload — no media, no text.</summary>

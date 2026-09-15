@@ -86,11 +86,20 @@ public sealed class HandleIncomingMessageHandler(
                     // Cache first: the messenger deletes the files it was handed once the upload
                     // finishes, so after the send there is nothing left to copy.
                     await cache.SaveAsync(ok.Value, extractorName, cancellationToken);
-                    await messenger.ReplyWithMediaAsync(
+                    var deliveryError = await messenger.ReplyWithMediaAsync(
                         message.ChatId,
                         message.MessageId,
                         ok.Value,
                         cancellationToken);
+                    if (deliveryError is not null)
+                    {
+                        // The chat already has the source link in place of the media. Stop here: a
+                        // later extractor would only hand Telegram the same upload again.
+                        metrics.RecordFailure(extractorName);
+                        await RecordDeliveryFailureAsync(message, url, extractorName, deliveryError, startedAt, cancellationToken);
+                        return;
+                    }
+
                     metrics.RecordMediaRepost(extractorName);
                     await journal.RecordMediaRepostAsync(
                         url, extractorName, ok.Value.Items.Count, TotalBytes(ok.Value),
@@ -189,11 +198,20 @@ public sealed class HandleIncomingMessageHandler(
 
         if (cached.Payload.HasMedia)
         {
-            await messenger.ReplyWithMediaAsync(
+            var deliveryError = await messenger.ReplyWithMediaAsync(
                 message.ChatId,
                 message.MessageId,
                 cached.Payload,
                 cancellationToken);
+            if (deliveryError is not null)
+            {
+                // Still handled: the bytes were fine, Telegram was not, so a fresh extraction would only
+                // repeat the upload the chat just got a source link for.
+                metrics.RecordFailure(cached.Extractor);
+                await RecordDeliveryFailureAsync(message, url, CacheExtractorName, deliveryError, startedAt, cancellationToken);
+                return true;
+            }
+
             metrics.RecordMediaRepost(cached.Extractor);
             await journal.RecordMediaRepostAsync(
                 url, CacheExtractorName, cached.Payload.Items.Count, TotalBytes(cached.Payload),
@@ -221,6 +239,26 @@ public sealed class HandleIncomingMessageHandler(
             "Served {Url} from cache (originally via {Extractor}) into chat {ChatId}",
             url, cached.Extractor, message.ChatId);
         return true;
+    }
+
+    /// <summary>
+    /// Journals media that never reached the chat as a failure. Without the row the upload would vanish
+    /// from the dashboard and, worse, from the watchdog — it polls <c>Failure</c> rows and nothing else.
+    /// </summary>
+    private async Task RecordDeliveryFailureAsync(
+        IncomingMessage message,
+        Uri url,
+        string extractor,
+        DeliveryError deliveryError,
+        long startedAt,
+        CancellationToken cancellationToken)
+    {
+        logger.LogWarning(
+            "Media from {Url} via {Extractor} was not delivered to chat {ChatId}: {Reason}",
+            url, extractor, message.ChatId, deliveryError.Reason);
+        await journal.RecordDeliveryFailureAsync(
+            url, extractor, deliveryError,
+            timeProvider.GetElapsedTime(startedAt), message.ChatId, cancellationToken);
     }
 
     private static bool HasReplyableText(MediaPayload payload)
