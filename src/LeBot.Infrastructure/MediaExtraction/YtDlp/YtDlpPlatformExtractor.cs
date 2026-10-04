@@ -57,11 +57,50 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
         Uri url,
         CancellationToken cancellationToken)
     {
+        var attempt = await ExtractWithOptionsAsync(url, BuildOptionSet(), cancellationToken);
+
+        // A browser session the platform has stopped honouring is worse than no session at all:
+        // a revoked Instagram sessionid makes every reel come back HTTP 400, while the same reel
+        // extracts fine anonymously. Cookies still go first — they are what reaches gated posts —
+        // but their failure must not end the attempt when dropping them is a real second chance.
+        if (attempt is not Result<MediaPayload, ExtractionError>.Err err
+            || !ShouldRetryWithoutCookies(err.Error))
+        {
+            return attempt;
+        }
+
+        _logger.LogWarning(
+            "Retrying {Url} without browser cookies after the cookied attempt failed: {Detail}",
+            url,
+            err.Error.Reason);
+
+        return await ExtractWithOptionsAsync(
+            url,
+            BuildOptionSet(withBrowserCookies: false),
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// True when a failed cookied attempt is worth repeating anonymously. Needs cookies to have
+    /// been in play at all, and skips the two failures a second run cannot change: a URL yt-dlp
+    /// disowns — every shop and news link in the chat, where re-running would double the cost of
+    /// the common case for nothing — and TikTok's bot challenge, which
+    /// <see cref="WithTransientRetryAsync"/> has already rolled ten times and the mirror
+    /// extractor covers from there.
+    /// </summary>
+    internal bool ShouldRetryWithoutCookies(ExtractionError error) =>
+        !string.IsNullOrEmpty(_options.CookiesFromBrowser)
+        && error is not ExtractionError.UnsupportedPlatform
+        && !YtDlpErrorClassifier.IsTransientChallengeFailure(error.Reason);
+
+    private async Task<Result<MediaPayload, ExtractionError>> ExtractWithOptionsAsync(
+        Uri url,
+        OptionSet optionSet,
+        CancellationToken cancellationToken)
+    {
         // Defence-in-depth against CVE-2025-43858: feed the canonical, percent-encoded form
         // so any shell metacharacters from the user message are escaped before yt-dlp sees them.
         var sanitisedUrl = url.AbsoluteUri;
-
-        var optionSet = BuildOptionSet();
 
         try
         {
@@ -229,10 +268,10 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
         catch (UnauthorizedAccessException) { }
     }
 
-    internal OptionSet BuildOptionSet()
+    internal OptionSet BuildOptionSet(bool withBrowserCookies = true)
     {
         var opts = new OptionSet();
-        if (!string.IsNullOrEmpty(_options.CookiesFromBrowser))
+        if (withBrowserCookies && !string.IsNullOrEmpty(_options.CookiesFromBrowser))
         {
             opts.CookiesFromBrowser = _options.CookiesFromBrowser;
         }
