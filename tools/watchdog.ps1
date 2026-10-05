@@ -333,7 +333,10 @@ ORDER BY Id;
     if ($LASTEXITCODE -ne 0) { throw "sqlite3 failed: $raw" }
     if ([string]::IsNullOrWhiteSpace($raw)) { return @() }
 
-    return @($raw | ConvertFrom-Json)
+    # sqlite3 -json prints one row per line, and a native command's output reaches PowerShell
+    # as one string per line. Piped as they are, ConvertFrom-Json parses `[{row},` on its own
+    # and throws — on every tick, since the checkpoint can then never move past the batch.
+    return @(($raw -join "`n") | ConvertFrom-Json)
 }
 
 function Get-MaxFailureId {
