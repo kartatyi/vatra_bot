@@ -73,6 +73,7 @@ public sealed class HandleIncomingMessageHandler(
 
         (MediaPayload Payload, string Extractor)? textFallback = null;
         var sawSubstantiveAttempt = false;
+        var sawFailure = false;
 
         foreach (var extractor in candidates)
         {
@@ -121,6 +122,7 @@ public sealed class HandleIncomingMessageHandler(
                         url, extractorName, err.Error,
                         timeProvider.GetElapsedTime(startedAt), message.ChatId, cancellationToken);
                     sawSubstantiveAttempt = true;
+                    sawFailure = true;
                     break;
 
                 case Result<MediaPayload, ExtractionError>.Ok:
@@ -135,7 +137,14 @@ public sealed class HandleIncomingMessageHandler(
 
         if (textFallback is { } fallback)
         {
-            await cache.SaveAsync(fallback.Payload, fallback.Extractor, cancellationToken);
+            // Text is only the whole answer when nothing in the chain failed. Otherwise it is what
+            // was left after a media extractor broke — a dead session, a rate limit — and caching it
+            // would serve that broken state for the entry's full lifetime, even after the cause is fixed.
+            if (!sawFailure)
+            {
+                await cache.SaveAsync(fallback.Payload, fallback.Extractor, cancellationToken);
+            }
+
             await messenger.ReplyWithTextAsync(
                 message.ChatId,
                 message.MessageId,
