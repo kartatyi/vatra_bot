@@ -223,6 +223,14 @@ The watchdog runs the deployment's own copy of `watchdog.ps1`, not the repo's, s
 
 The watchdog's own liveness check reports what the tasks quietly fix — see `tools/watchdog.ps1`. It alerts on Telegram when the bot has been missing for `-LivenessGraceMinutes`, and never restarts it: one supervisor, or you get the 409 above.
 
+The dashboard is the exception, because its failure is one the task cannot see: a reader up for days has wedged with the process still alive, serving its page while every `/api/*` call returns 500. The watchdog probes `-DashboardProbeUrl` every `-DashboardProbeMinutes`, and after `-DashboardFailuresBeforeRestart` failures in a row (5xx or no answer) restarts it through its task. It holds no token, so there is no 409 to race. If it wedges again within `-DashboardRestartCooldownMinutes` it alerts instead of looping, since a restart is evidently not the cure.
+
+```text
+dashboard process gone            → the task's next tick, the watchdog stays out of it
+process alive, /api/* 500 twice   → watchdog: Stop-ScheduledTask, Start-ScheduledTask
+wedged again inside the cooldown  → one Telegram alert, no restart loop
+```
+
 ### Watch the logs
 
 ```powershell

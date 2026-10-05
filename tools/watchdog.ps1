@@ -13,6 +13,10 @@
     has been gone longer than the grace period. It never restarts it — that is the
     scheduled task's job (tools/install-autostart.ps1).
 
+    Every few minutes it also probes the dashboard's API, and restarts the dashboard through
+    its scheduled task when a live reader keeps answering with 5xx or not at all — a wedge the
+    task cannot see, because the process never dies.
+
     Everything identifying the deployment (report chat id, bot token) is read at runtime
     from files under -DeployRoot. Nothing in this repository may carry it.
 
@@ -50,7 +54,23 @@ param(
 
     # How long the bot may be missing before it counts as down rather than restarting.
     # Task Scheduler retries every minute, so this is a few of its ticks.
-    [int] $LivenessGraceMinutes = 3
+    [int] $LivenessGraceMinutes = 3,
+
+    # A dashboard endpoint that has to read the journal to answer, probed for the wedge a
+    # live reader can fall into. Empty skips the probe (a deployment without a dashboard).
+    [string] $DashboardProbeUrl = 'http://127.0.0.1:5005/api/data',
+
+    # The scheduled task that owns the dashboard, and the process it runs as.
+    [string] $DashboardTaskName = 'LeBot Dashboard',
+    [string] $DashboardProcessName = 'LeBot.Dashboard',
+
+    # Minutes between probes, and how many failed probes in a row mean wedged rather than slow.
+    [int] $DashboardProbeMinutes = 2,
+    [int] $DashboardFailuresBeforeRestart = 2,
+
+    # A dashboard that wedges again this soon after a restart is not cured by restarting: the
+    # operator hears about it instead of getting a restart loop.
+    [int] $DashboardRestartCooldownMinutes = 60
 )
 
 $ErrorActionPreference = 'Stop'
@@ -154,6 +174,89 @@ function Watch-BotLiveness {
         $script:BotDownAlerted = $true
         Write-Log "bot process '$BotProcessName' still down after ${LivenessGraceMinutes}m" 'ERR'
         Send-OperatorAlert "Watchdog: бот лежить уже ${LivenessGraceMinutes}+ хв і не піднявся сам. Перевір задачу планувальника «LeBot»."
+    }
+}
+
+# A dashboard can be alive and still useless. Twice a reader that had been up for days began
+# answering every /api/* call with a 500 while its page kept loading, and a fresh process on
+# the same database served fine. The task cannot see that — it only restarts a process that
+# died — so this probe does, and restarts the reader through its task, never around it.
+#
+# Unlike the bot, the dashboard is safe to restart from here: it holds no Telegram token, so a
+# second copy is a port clash for a few seconds, not a 409.
+function Watch-DashboardHealth {
+    if (-not $DashboardProbeUrl) { return }
+    if ([datetime]::UtcNow -lt $script:DashboardNextProbe) { return }
+    $script:DashboardNextProbe = [datetime]::UtcNow.AddMinutes($DashboardProbeMinutes)
+
+    # A reader that is not running at all is the task's to bring back.
+    if (@(Get-Process -Name $DashboardProcessName -ErrorAction SilentlyContinue).Count -eq 0) {
+        $script:DashboardFailures = 0
+        return
+    }
+
+    $problem = $null
+    try {
+        $null = Invoke-WebRequest -Uri $DashboardProbeUrl -TimeoutSec 30 -UseBasicParsing
+    }
+    catch {
+        # Get-Prop, not .Response: a timeout carries no response, and strict mode would throw.
+        $response = Get-Prop $_.Exception 'Response'
+        $status = if ($response) { [int] $response.StatusCode } else { 0 }
+        # A 4xx means the probe asks the wrong question, which a restart would not change.
+        if ($status -eq 0 -or $status -ge 500) {
+            $problem = if ($status) { "HTTP $status" } else { $_.Exception.Message }
+        }
+    }
+
+    if (-not $problem) {
+        if ($script:DashboardFailures -gt 0 -or $script:DashboardHealAlerted) {
+            Write-Log 'dashboard answers again'
+        }
+        $script:DashboardFailures = 0
+        $script:DashboardHealAlerted = $false
+        return
+    }
+
+    $script:DashboardFailures++
+    Write-Log "dashboard probe failed ($($script:DashboardFailures)/$DashboardFailuresBeforeRestart): $problem" 'WRN'
+    if ($script:DashboardFailures -lt $DashboardFailuresBeforeRestart) { return }
+
+    if ($script:DashboardRestartedAt -and
+        ([datetime]::UtcNow - $script:DashboardRestartedAt).TotalMinutes -lt $DashboardRestartCooldownMinutes) {
+        if (-not $script:DashboardHealAlerted) {
+            $script:DashboardHealAlerted = $true
+            Write-Log 'dashboard failing again right after a restart — leaving it to the operator' 'ERR'
+            Send-OperatorAlert "Watchdog: дашборд знову відповідає помилкою ($problem) одразу після перезапуску. Стек — у logs\dashboard-*.log."
+        }
+        return
+    }
+
+    Restart-Dashboard -Reason $problem
+}
+
+# Stop and start through the task, without the disable/enable that an exe swap needs: that
+# dance stops the task restoring the old binary mid-copy, a restart has nothing to race, and a
+# task left disabled by a failed step would be worse than the wedge it was meant to clear.
+function Restart-Dashboard {
+    param([string] $Reason)
+
+    Write-Log "dashboard wedged ($Reason) — restarting it through task '$DashboardTaskName'" 'WRN'
+    $script:DashboardRestartedAt = [datetime]::UtcNow
+    $script:DashboardFailures = 0
+
+    try {
+        Stop-ScheduledTask -TaskName $DashboardTaskName
+        Get-Process -Name $DashboardProcessName -ErrorAction SilentlyContinue | Stop-Process -Force
+        for ($i = 0; $i -lt 15 -and @(Get-Process -Name $DashboardProcessName -ErrorAction SilentlyContinue).Count -gt 0; $i++) {
+            Start-Sleep -Seconds 1
+        }
+        Start-ScheduledTask -TaskName $DashboardTaskName
+        Write-Log 'dashboard restarted'
+    }
+    catch {
+        # The task's own repeating tick brings a stopped reader back within its interval anyway.
+        Write-Log "dashboard restart failed: $($_.Exception.Message)" 'ERR'
     }
 }
 
@@ -324,13 +427,19 @@ $lastStamp = ''
 $authAlerted = $false
 $script:BotDownSince = $null
 $script:BotDownAlerted = $false
+$script:DashboardNextProbe = [datetime]::MinValue
+$script:DashboardFailures = 0
+$script:DashboardRestartedAt = $null
+$script:DashboardHealAlerted = $false
 
 while ($true) {
     try {
         # Ahead of the PAUSE check deliberately: PAUSE silences agent runs, but "the bot is
         # not running" is the one thing you always want to hear — the more so because the
-        # 401 auto-pause path below writes PAUSE itself.
+        # 401 auto-pause path below writes PAUSE itself. The dashboard probe sits here for
+        # the same reason: it involves no agent, and an auto-pause must not switch it off.
         Watch-BotLiveness
+        Watch-DashboardHealth
 
         if (Test-Path $PausePath) {
             if (-not $Once) { Start-Sleep -Seconds $PollSeconds; continue }
