@@ -175,7 +175,8 @@ yt-dlp knobs ([`YtDlpOptions`](src/LeBot.Infrastructure/Configuration/YtDlpOptio
 ```jsonc
 "YtDlp": {
   "BinaryPath": "tools/yt-dlp/yt-dlp.exe",  // fetched by tools/fetch-tools.ps1, not committed
-  "CookiesFromBrowser": null,               // "firefox" | "chrome" | … → reaches login-gated IG/X content
+  "CookiesFromBrowser": null,               // "firefox" | "chrome" | … → reaches login-gated IG/X content;
+                                            // spent only after an anonymous attempt fails — a bot's volume gets accounts banned
   "FfmpegPath": null,                        // only for formats yt-dlp must merge/transcode
   "MaxFileSizeMb": 50                        // skip above Telegram's upload ceiling
 }

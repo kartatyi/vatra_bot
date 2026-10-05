@@ -92,20 +92,24 @@ public static class DependencyInjection
         services.AddSingleton<IBrowserVideoResolver, ChromeDevToolsVideoResolver>();
 
         // Order matters: extractors are tried in the order they're registered. The narrow extractors
-        // claim URL families that yt-dlp can't serve (Instagram photo posts / carousels, Threads
-        // posts on the new .com domain) and run first; a successful extraction pulls the chain out
-        // before yt-dlp wastes a process spawn on the same URL. When they return nothing useful the
-        // handler falls through to YtDlpPlatformExtractor, which handles everything else.
+        // claim URL families that yt-dlp can't serve (Threads posts on the new .com domain) and run
+        // first; a successful extraction pulls the chain out before yt-dlp wastes a process spawn on
+        // the same URL. When they return nothing useful the handler falls through to
+        // YtDlpPlatformExtractor, which handles everything else.
         //
         // ThreadsVideoExtractor precedes ThreadsEmbedExtractor: it claims video posts (returning the
         // real clip), and declines photo/text posts so the embed extractor's og:image still serves.
-        services.AddSingleton<IPlatformExtractor, InstagramApiExtractor>();
         services.AddSingleton<IPlatformExtractor, ThreadsVideoExtractor>();
         services.AddSingleton<IPlatformExtractor, ThreadsEmbedExtractor>();
         // auto.ria isn't in yt-dlp's site list; this extractor reposts an advert's photo gallery with
         // a spec caption. It claims only auto.ria advert URLs, so ordering ahead of yt-dlp is harmless.
         services.AddSingleton<IPlatformExtractor, AutoRiaExtractor>();
         services.AddSingleton<IPlatformExtractor, YtDlpPlatformExtractor>();
+        // Strictly after yt-dlp: this one always spends the logged-in Instagram session, so it only
+        // earns its turn once yt-dlp's anonymous pass has come back without media — which is what a
+        // photo post or image carousel does. Video posts never reach it. yt-dlp leaves the session
+        // retry on these URLs to it, so one link costs the account at most one fetch.
+        services.AddSingleton<IPlatformExtractor, InstagramApiExtractor>();
 
         services.AddSingleton<IReleaseSource, GitHubReleaseSource>();
         services.AddSingleton<IAppVersion, AssemblyAppVersion>();

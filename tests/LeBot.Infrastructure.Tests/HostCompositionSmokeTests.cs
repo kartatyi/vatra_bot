@@ -3,6 +3,8 @@ using LeBot.Application.Ports;
 using LeBot.Application.UseCases.HandleIncomingMessage;
 using LeBot.Infrastructure.Configuration;
 using LeBot.Infrastructure.Maintenance;
+using LeBot.Infrastructure.MediaExtraction.Instagram;
+using LeBot.Infrastructure.MediaExtraction.YtDlp;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -57,6 +59,31 @@ public class HostCompositionSmokeTests
         host.Services.GetRequiredService<IReleaseSource>().Should().NotBeNull();
         host.Services.GetRequiredService<IAppVersion>().Should().NotBeNull();
         host.Services.GetRequiredService<IUpdateInstaller>().Should().NotBeNull();
+    }
+
+    [Fact]
+    public void DiGraph_InstagramSessionExtractor_IsTriedAfterAnonymousYtDlp()
+    {
+        var builder = Host.CreateApplicationBuilder([]);
+
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Telegram:BotToken"] = "0123456789:placeholder-token-for-resolution-only",
+            ["YtDlp:BinaryPath"] = "yt-dlp",
+            ["YtDlp:DownloadDirectory"] = Path.Combine(Path.GetTempPath(), "lebot-smoke-test"),
+        });
+
+        builder.Services.AddApplicationServices();
+        builder.Services.AddInfrastructureServices(builder.Configuration);
+
+        using var host = builder.Build();
+
+        var order = host.Services.GetServices<IPlatformExtractor>().Select(e => e.GetType()).ToList();
+
+        // Registration order is the try order. The API extractor spends the logged-in session on
+        // every call, so it must only see what yt-dlp's anonymous pass could not serve.
+        order.IndexOf(typeof(InstagramApiExtractor)).Should().BeGreaterThan(
+            order.IndexOf(typeof(YtDlpPlatformExtractor)));
     }
 
     [Fact]
