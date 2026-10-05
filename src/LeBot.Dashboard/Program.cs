@@ -1,6 +1,9 @@
+using System.Globalization;
 using LeBot.Application.Telemetry;
 using LeBot.Dashboard;
 using LeBot.Infrastructure;
+using Serilog;
+using Serilog.Events;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,6 +22,24 @@ if (string.IsNullOrWhiteSpace(builder.Configuration["urls"]))
 {
     builder.WebHost.UseUrls("http://127.0.0.1:5005");
 }
+
+// Run unattended, the dashboard's console goes nowhere, so an exception that turned an endpoint into
+// a 500 used to leave no trace — a wedged reader could only be restarted, never diagnosed. A rolling
+// file beside the exe keeps the stack. Configured in code, not from appsettings.json: next to the bot
+// that file holds the bot's own Serilog section, and two processes on one rolling file fight over it.
+var logPath = Path.Combine(AppContext.BaseDirectory, "logs", "dashboard-.log");
+builder.Services.AddSerilog(config => config
+    .MinimumLevel.Information()
+    .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
+    .MinimumLevel.Override("Microsoft.Hosting.Lifetime", LogEventLevel.Information)
+    .Enrich.FromLogContext()
+    .WriteTo.Console(formatProvider: CultureInfo.InvariantCulture)
+    .WriteTo.File(
+        logPath,
+        rollingInterval: RollingInterval.Day,
+        retainedFileCountLimit: 7,
+        formatProvider: CultureInfo.InvariantCulture,
+        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj} {Properties:j}{NewLine}{Exception}"));
 
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddRepostJournalReader(databasePath);
