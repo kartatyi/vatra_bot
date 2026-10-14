@@ -22,6 +22,7 @@ public sealed class FfmpegVideoCompressorFallbackTests : IDisposable
 
     private readonly FakeTimeProvider _time = new();
     private readonly List<string> _encodersRun = [];
+    private readonly List<int> _videoKbpsRun = [];
     private readonly Dictionary<string, Func<string, CancellationToken, Task<ToolRun>>> _encoders = [];
     private string _probe = ReelProbe;
 
@@ -56,7 +57,7 @@ public sealed class FfmpegVideoCompressorFallbackTests : IDisposable
     }
 
     [Fact]
-    public async Task CompressAsync_GpuOvershootsTheCap_CompressesOnTheCpu()
+    public async Task CompressAsync_GpuOvershootsTwice_CompressesOnTheCpu()
     {
         _encoders["h264_nvenc"] = Writes(CapBytes + 1);
         _encoders["libx264"] = Writes(CapBytes / 2);
@@ -64,7 +65,36 @@ public sealed class FfmpegVideoCompressorFallbackTests : IDisposable
         var result = await CreateSut().CompressAsync(Source, CapBytes, CancellationToken.None);
 
         result.Should().Be(Result<string, ExtractionError>.Success(Output));
+        _encodersRun.Should().Equal("h264_nvenc", "h264_nvenc", "libx264");
         new FileInfo(Output).Length.Should().Be(CapBytes / 2);
+    }
+
+    [Fact]
+    public async Task CompressAsync_CpuOvershoots_RetriesAtALowerBitrateUntilItFits()
+    {
+        _encoders["h264_nvenc"] = Fails("no NVIDIA card");
+        _encoders["libx264"] = InTurn(Writes(CapBytes + CapBytes / 10), Writes(CapBytes / 2));
+
+        var result = await CreateSut().CompressAsync(Source, CapBytes, CancellationToken.None);
+
+        result.Should().Be(Result<string, ExtractionError>.Success(Output));
+        _encodersRun.Should().Equal("h264_nvenc", "libx264", "libx264");
+        _videoKbpsRun[2].Should().BeLessThan(_videoKbpsRun[1]);
+    }
+
+    [Fact]
+    public async Task CompressAsync_CpuOvershootsTwice_GivesUpRatherThanPostAnOversizeFile()
+    {
+        _encoders["h264_nvenc"] = Fails("no NVIDIA card");
+        _encoders["libx264"] = Writes(CapBytes + 1);
+
+        var result = await CreateSut().CompressAsync(Source, CapBytes, CancellationToken.None);
+
+        result.Should().BeOfType<Result<string, ExtractionError>.Err>()
+            .Which.Error.Should().BeOfType<ExtractionError.ToolFailure>()
+            .Which.Detail.Should().StartWith("libx264 still came out at 50MB");
+        _encodersRun.Should().Equal("h264_nvenc", "libx264", "libx264");
+        File.Exists(Output).Should().BeFalse();
     }
 
     [Fact]
@@ -145,6 +175,7 @@ public sealed class FfmpegVideoCompressorFallbackTests : IDisposable
 
         var encoder = arguments[arguments.ToList().IndexOf("-c:v") + 1];
         _encodersRun.Add(encoder);
+        _videoKbpsRun.Add(int.Parse(arguments[arguments.ToList().IndexOf("-b:v") + 1].TrimEnd('k')));
         return _encoders[encoder](arguments[^1], token);
     }
 
@@ -157,6 +188,13 @@ public sealed class FfmpegVideoCompressorFallbackTests : IDisposable
 
         return Task.FromResult(new ToolRun(0, string.Empty, string.Empty));
     };
+
+    private static Func<string, CancellationToken, Task<ToolRun>> InTurn(
+        params Func<string, CancellationToken, Task<ToolRun>>[] runs)
+    {
+        var next = 0;
+        return (outputPath, token) => runs[Math.Min(next++, runs.Length - 1)](outputPath, token);
+    }
 
     private static Func<string, CancellationToken, Task<ToolRun>> Fails(string error) =>
         (_, _) => Task.FromResult(new ToolRun(1, string.Empty, error + "\nError while opening encoder"));

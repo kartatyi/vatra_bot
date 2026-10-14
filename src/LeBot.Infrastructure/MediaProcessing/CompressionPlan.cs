@@ -50,6 +50,17 @@ internal sealed record CompressionPlan(int VideoKbps, int AudioKbps, int MaxLong
         return WithVideoKbps(videoKbps, audioKbps);
     }
 
+    /// <summary>
+    /// A second plan for when an encode still came out at <paramref name="producedBytes"/>, over
+    /// <paramref name="maxBytes"/>: the bitrate scaled down by the overshoot, with a further margin so
+    /// the retry lands inside. <c>null</c> when that would drop below a watchable bitrate.
+    /// </summary>
+    public CompressionPlan? ShrunkToFit(long producedBytes, long maxBytes)
+    {
+        var videoKbps = (int)Math.Floor(VideoKbps * (double)maxBytes / producedBytes * 0.9);
+        return WithVideoKbps(videoKbps, AudioKbps);
+    }
+
     private static CompressionPlan? WithVideoKbps(int videoKbps, int audioKbps)
     {
         if (videoKbps < MinVideoKbps)

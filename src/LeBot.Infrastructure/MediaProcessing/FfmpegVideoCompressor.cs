@@ -118,24 +118,43 @@ internal sealed class FfmpegVideoCompressor : IVideoCompressor
         foreach (var encoder in VideoEncoders)
         {
             var isLastResort = encoder == VideoEncoders[^1];
-            var arguments = BuildEncodeArguments(sourcePath, outputPath, plan, encoder);
-            var encode = isLastResort
-                ? await _runTool(_ffmpegPath, arguments, cancellationToken)
-                : await RunWithinHardwareBudgetAsync(arguments, cancellationToken);
+            CompressionPlan? attempt = plan;
 
-            var output = new FileInfo(outputPath);
-            if (encode.ExitCode == 0 && output.Exists && output.Length <= maxBytes)
+            // Fitting the cap comes before the bitrate: an encode that still overshoots gets one more pass
+            // on the same encoder, scaled down by how far it overshot, before this encoder is given up on.
+            for (var retriesLeft = 1; attempt is not null; retriesLeft--)
             {
-                _logger.LogInformation(
-                    "Re-encoded {Path} ({DurationSeconds}s) with {Encoder} at {VideoKbps}kbps, long side up to {MaxLongSide}px",
-                    sourcePath, (int)media.DurationSeconds, encoder, plan.VideoKbps, plan.MaxLongSide);
-                return Result<string, ExtractionError>.Success(outputPath);
-            }
+                var arguments = BuildEncodeArguments(sourcePath, outputPath, attempt, encoder);
+                var encode = isLastResort
+                    ? await _runTool(_ffmpegPath, arguments, cancellationToken)
+                    : await RunWithinHardwareBudgetAsync(arguments, cancellationToken);
 
-            BestEffortDelete(outputPath);
-            failure = encode.ExitCode == 0 && output.Exists
-                ? $"{encoder} still came out at {output.Length / (1024 * 1024)}MB"
-                : $"{encoder} failed: {encode.Summary}";
+                var output = new FileInfo(outputPath);
+                var producedBytes = encode.ExitCode == 0 && output.Exists ? output.Length : 0;
+                if (producedBytes is > 0 && producedBytes <= maxBytes)
+                {
+                    _logger.LogInformation(
+                        "Re-encoded {Path} ({DurationSeconds}s) with {Encoder} at {VideoKbps}kbps, long side up to {MaxLongSide}px",
+                        sourcePath, (int)media.DurationSeconds, encoder, attempt.VideoKbps, attempt.MaxLongSide);
+                    return Result<string, ExtractionError>.Success(outputPath);
+                }
+
+                BestEffortDelete(outputPath);
+                if (producedBytes == 0)
+                {
+                    failure = $"{encoder} failed: {encode.Summary}";
+                    break;
+                }
+
+                failure = $"{encoder} still came out at {producedBytes / (1024 * 1024)}MB at {attempt.VideoKbps}kbps";
+                attempt = retriesLeft > 0 ? attempt.ShrunkToFit(producedBytes, maxBytes) : null;
+                if (attempt is not null)
+                {
+                    _logger.LogWarning(
+                        "Retrying {Encoder} at {VideoKbps}kbps for {Path}: {Detail}",
+                        encoder, attempt.VideoKbps, sourcePath, failure);
+                }
+            }
 
             if (!isLastResort)
             {

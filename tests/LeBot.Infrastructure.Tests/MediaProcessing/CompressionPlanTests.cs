@@ -69,4 +69,24 @@ public class CompressionPlanTests
 
         plan.Should().BeNull();
     }
+
+    [Fact]
+    public void ShrunkToFit_Overshoot_ScalesTheBitrateDownWithAMargin()
+    {
+        var plan = new CompressionPlan(VideoKbps: 2000, AudioKbps: 128, MaxLongSide: 1280);
+
+        var retry = plan.ShrunkToFit(producedBytes: 2 * FiftyMb, maxBytes: FiftyMb);
+
+        retry.Should().Be(new CompressionPlan(VideoKbps: 900, AudioKbps: 128, MaxLongSide: 854));
+    }
+
+    [Fact]
+    public void ShrunkToFit_WouldDropBelowAWatchableBitrate_ReturnsNull()
+    {
+        var plan = new CompressionPlan(VideoKbps: 500, AudioKbps: 128, MaxLongSide: 854);
+
+        var retry = plan.ShrunkToFit(producedBytes: 2 * FiftyMb, maxBytes: FiftyMb);
+
+        retry.Should().BeNull();
+    }
 }
