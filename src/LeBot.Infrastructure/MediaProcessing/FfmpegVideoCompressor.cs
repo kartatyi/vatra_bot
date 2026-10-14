@@ -249,7 +249,7 @@ internal sealed class FfmpegVideoCompressor : IVideoCompressor
             .. EncoderSettings(encoder),
             "-pix_fmt", "yuv420p",
             "-b:v", $"{videoKbps}k", "-maxrate", $"{videoKbps}k",
-            "-bufsize", $"{(plan.VideoKbps * 2).ToString(CultureInfo.InvariantCulture)}k",
+            "-bufsize", $"{(plan.VideoKbps * CompressionPlan.BufferSeconds).ToString(CultureInfo.InvariantCulture)}k",
         ];
 
         arguments.AddRange(plan.AudioKbps > 0
