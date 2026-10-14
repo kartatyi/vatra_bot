@@ -109,7 +109,7 @@ public class FfmpegVideoCompressorTests
 
         var arguments = FfmpegVideoCompressor.BuildEncodeArguments("in.mp4", "out.mp4", plan, "libx264");
 
-        arguments.Should().ContainInConsecutiveOrder("-c:v", "libx264", "-preset", "veryfast");
+        arguments.Should().ContainInConsecutiveOrder("-c:v", "libx264", "-preset", "fast");
         arguments.Should().ContainInConsecutiveOrder("-pix_fmt", "yuv420p");
         arguments.Should().ContainInConsecutiveOrder("-b:v", "3126k");
         arguments.Should().ContainInConsecutiveOrder("-c:a", "aac", "-b:a", "128k");

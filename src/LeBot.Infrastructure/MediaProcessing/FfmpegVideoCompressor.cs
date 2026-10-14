@@ -18,7 +18,7 @@ internal sealed class FfmpegVideoCompressor : IVideoCompressor
 {
     /// <summary>
     /// Updates are handled one at a time, so an encode holds up every chat behind it. On the PC the bot
-    /// runs on, veryfast encodes 720p at ~8× real time; this bound still covers several minutes of
+    /// runs on, x264 fast encodes 720p at ~5× real time; this bound still covers a couple of minutes of
     /// 1080p, and the plan's bitrate floor already turns away anything much longer.
     /// </summary>
     internal static readonly TimeSpan Timeout = TimeSpan.FromMinutes(2);
@@ -31,7 +31,7 @@ internal sealed class FfmpegVideoCompressor : IVideoCompressor
     internal static readonly TimeSpan HardwareEncoderTimeout = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// Tried in order. NVENC encodes on the GPU in a second or two where libx264 spends ~10 s of CPU,
+    /// Tried in order. NVENC encodes on the GPU in a second or two where libx264 spends ~20 s of CPU,
     /// but it needs an NVIDIA card, a driver new enough for this ffmpeg build and a free encoder
     /// session. Missing any of them it refuses within a fraction of a second, and libx264 — built into
     /// every ffmpeg — takes over. So does it when the GPU errors, hangs or overshoots the cap.
@@ -261,13 +261,16 @@ internal sealed class FfmpegVideoCompressor : IVideoCompressor
     }
 
     /// <summary>
-    /// p5 is NVENC's "slow, good quality" preset — still far faster than real time — and VBR capped at
-    /// the target rate mirrors libx264's ABR, so both land at the size the plan expects.
+    /// x264's fast, not veryfast: on the reel that surfaced this, at the same 43 MB, veryfast scored
+    /// VMAF 91.5 against the source and fast 95.5 — past the point where the difference shows — for
+    /// 22 s of CPU instead of 12. medium and slow add under a point for much more time. p5 is NVENC's
+    /// "slow, good quality" preset, still far faster than real time, and VBR capped at the target rate
+    /// mirrors libx264's capped ABR, so both land at the size the plan expects.
     /// </summary>
     private static IReadOnlyList<string> EncoderSettings(string encoder) => encoder switch
     {
         "h264_nvenc" => ["-c:v", "h264_nvenc", "-preset", "p5", "-tune", "hq", "-rc", "vbr"],
-        "libx264" => ["-c:v", "libx264", "-preset", "veryfast"],
+        "libx264" => ["-c:v", "libx264", "-preset", "fast"],
         _ => throw new ArgumentOutOfRangeException(nameof(encoder), encoder, "No settings for this encoder."),
     };
 
