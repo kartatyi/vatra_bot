@@ -1,7 +1,9 @@
+using System.Diagnostics;
 using LeBot.Application.Ports;
 using LeBot.Domain.Common;
 using LeBot.Domain.Media;
 using LeBot.Infrastructure.Configuration;
+using LeBot.Infrastructure.MediaProcessing;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Polly;
@@ -16,17 +18,20 @@ namespace LeBot.Infrastructure.MediaExtraction.YtDlp;
 /// list of hosts where the user is likely to post links; everything else falls
 /// through so a future per-platform extractor can take over.
 /// </summary>
-public sealed class YtDlpPlatformExtractor : IPlatformExtractor
+internal sealed class YtDlpPlatformExtractor : IPlatformExtractor
 {
     private readonly YoutubeDL _ytdl;
     private readonly YtDlpOptions _options;
+    private readonly IVideoCompressor _compressor;
     private readonly ILogger<YtDlpPlatformExtractor> _logger;
 
     public YtDlpPlatformExtractor(
         IOptions<YtDlpOptions> options,
+        IVideoCompressor compressor,
         ILogger<YtDlpPlatformExtractor> logger)
     {
         _options = options.Value;
+        _compressor = compressor;
         _logger = logger;
 
         Directory.CreateDirectory(_options.ResolvedDownloadDirectory);
@@ -184,16 +189,14 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
                     new ExtractionError.ToolFailure($"output file missing: {filePath}"));
             }
 
-            var fileInfo = new FileInfo(filePath);
-            if (fileInfo.Length > maxBytes)
+            if (await FitUnderCapAsync(filePath, maxBytes, cancellationToken) is not { } postablePath)
             {
-                _logger.LogInformation(
-                    "Discarding {Path}: actual size {SizeMb}MB exceeds limit {LimitMb}MB",
-                    filePath, fileInfo.Length / (1024 * 1024), _options.MaxFileSizeMb);
-                BestEffortDelete(filePath);
                 return Result<MediaPayload, ExtractionError>.Success(
                     new MediaPayload(url, info.Title, info.Uploader, [], info.Description));
             }
+
+            filePath = postablePath;
+            var fileInfo = new FileInfo(filePath);
 
             var item = new MediaItem(
                 FilePath: filePath,
@@ -211,6 +214,52 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
             return Result<MediaPayload, ExtractionError>.Failure(
                 new ExtractionError.ToolFailure(ex.Message));
         }
+    }
+
+    /// <summary>
+    /// Returns the file to post: <paramref name="filePath"/> itself when it is within the cap, else a
+    /// re-encoded copy that fits. <c>null</c> when it cannot be made to fit — the download is deleted
+    /// and the caller replies with the caption. The predicted-size check upstream cannot catch this
+    /// case: Instagram publishes no size for its muxed reels, so the first sign is the file on disk.
+    /// </summary>
+    internal async Task<string?> FitUnderCapAsync(string filePath, long maxBytes, CancellationToken cancellationToken)
+    {
+        var sizeBytes = new FileInfo(filePath).Length;
+        if (sizeBytes <= maxBytes)
+        {
+            return filePath;
+        }
+
+        if (_options.CompressOversizeVideos && DetermineKind(filePath) == MediaKind.Video)
+        {
+            var started = Stopwatch.GetTimestamp();
+
+            switch (await _compressor.CompressAsync(filePath, maxBytes, cancellationToken))
+            {
+                case Result<string, ExtractionError>.Ok { Value: var compressedPath }:
+                    _logger.LogInformation(
+                        "Compressed {Path} from {SizeMb}MB to {CompressedMb}MB in {ElapsedMs}ms to fit limit {LimitMb}MB",
+                        filePath,
+                        sizeBytes / (1024 * 1024),
+                        new FileInfo(compressedPath).Length / (1024 * 1024),
+                        (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+                        _options.MaxFileSizeMb);
+                    BestEffortDelete(filePath);
+                    return compressedPath;
+
+                case Result<string, ExtractionError>.Err { Error: var error }:
+                    _logger.LogWarning(
+                        "Could not compress {Path} under limit {LimitMb}MB: {Detail}",
+                        filePath, _options.MaxFileSizeMb, error.Reason);
+                    break;
+            }
+        }
+
+        _logger.LogInformation(
+            "Discarding {Path}: actual size {SizeMb}MB exceeds limit {LimitMb}MB",
+            filePath, sizeBytes / (1024 * 1024), _options.MaxFileSizeMb);
+        BestEffortDelete(filePath);
+        return null;
     }
 
     private static string JoinErrors(IEnumerable<string> errorOutput)

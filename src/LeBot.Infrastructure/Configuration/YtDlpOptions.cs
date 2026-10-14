@@ -10,7 +10,10 @@ public sealed class YtDlpOptions
     /// <summary>Path to the yt-dlp binary. Fetched by <c>tools/fetch-tools.ps1</c>.</summary>
     public string BinaryPath { get; init; } = "tools/yt-dlp/yt-dlp.exe";
 
-    /// <summary>Optional ffmpeg path; required only for formats yt-dlp must merge or transcode.</summary>
+    /// <summary>
+    /// Optional ffmpeg path; unset, the ffmpeg beside the yt-dlp binary is used. Needed for formats
+    /// yt-dlp must merge or transcode, and — with ffprobe beside it — to compress an oversize video.
+    /// </summary>
     public string? FfmpegPath { get; init; }
 
     /// <summary>
@@ -40,4 +43,10 @@ public sealed class YtDlpOptions
     /// and avoid Telegram's 50&#160;MB upload ceiling.
     /// </summary>
     public int MaxFileSizeMb { get; init; } = 50;
+
+    /// <summary>
+    /// When a downloaded video comes out over <see cref="MaxFileSizeMb"/>, re-encode it with ffmpeg to
+    /// fit instead of replying with the caption alone. Off restores the text-only reply.
+    /// </summary>
+    public bool CompressOversizeVideos { get; init; } = true;
 }

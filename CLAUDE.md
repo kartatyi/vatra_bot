@@ -176,8 +176,10 @@ yt-dlp knobs ([`YtDlpOptions`](src/LeBot.Infrastructure/Configuration/YtDlpOptio
 "YtDlp": {
   "BinaryPath": "tools/yt-dlp/yt-dlp.exe",  // fetched by tools/fetch-tools.ps1, not committed
   "CookiesFromBrowser": null,               // "firefox" | "chrome" | … → reaches login-gated IG/X content
-  "FfmpegPath": null,                        // only for formats yt-dlp must merge/transcode
-  "MaxFileSizeMb": 50                        // skip above Telegram's upload ceiling
+  "FfmpegPath": null,                        // null → the ffmpeg beside yt-dlp; merges DASH, compresses oversize
+  "MaxFileSizeMb": 50,                       // Telegram's upload ceiling for bots
+  "CompressOversizeVideos": true             // a video over the cap is re-encoded to fit (ffmpeg + ffprobe);
+                                             // false → caption-only reply, as before
 }
 ```
 
