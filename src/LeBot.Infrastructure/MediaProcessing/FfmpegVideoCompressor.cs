@@ -12,7 +12,7 @@ namespace LeBot.Infrastructure.MediaProcessing;
 
 /// <summary>
 /// Shrinks a video with ffmpeg: ffprobe reads its length, <see cref="CompressionPlan"/> turns that into
-/// a bitrate that fits the cap, and libx264 re-encodes at it. Both tools are looked for where yt-dlp
+/// a bitrate that fits the cap, and the GPU — else libx264 — re-encodes at it. Both tools are looked for where yt-dlp
 /// already finds ffmpeg — <see cref="YtDlpOptions.FfmpegPath"/>, else beside the yt-dlp binary. A missing
 /// tool fails the compression, never the repost: the caller falls back to a text reply.
 /// </summary>
@@ -26,6 +26,14 @@ internal sealed class FfmpegVideoCompressor(
     /// 1080p, and the plan's bitrate floor already turns away anything much longer.
     /// </summary>
     internal static readonly TimeSpan Timeout = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// Tried in order. NVENC encodes on the GPU in a second or two where libx264 spends ~10 s of CPU,
+    /// but it needs an NVIDIA card, a driver new enough for this ffmpeg build and a free encoder
+    /// session. Missing any of them it refuses within a fraction of a second, and libx264 — built into
+    /// every ffmpeg — takes over.
+    /// </summary>
+    internal static readonly IReadOnlyList<string> VideoEncoders = ["h264_nvenc", "libx264"];
 
     private readonly string _ffmpegPath = ResolveFfmpegPath(options.Value);
 
@@ -80,25 +88,33 @@ internal sealed class FfmpegVideoCompressor(
                 $"{media.DurationSeconds:0}s is too long to fit {maxBytes / (1024 * 1024)}MB at a watchable bitrate");
         }
 
-        logger.LogInformation(
-            "Re-encoding {Path} ({DurationSeconds}s) at {VideoKbps}kbps, long side up to {MaxLongSide}px",
-            sourcePath, (int)media.DurationSeconds, plan.VideoKbps, plan.MaxLongSide);
-
-        var encode = await RunAsync(_ffmpegPath, BuildEncodeArguments(sourcePath, outputPath, plan), cancellationToken);
-        if (encode.ExitCode != 0 || !File.Exists(outputPath))
+        var failure = string.Empty;
+        foreach (var encoder in VideoEncoders)
         {
+            var encode = await RunAsync(
+                _ffmpegPath, BuildEncodeArguments(sourcePath, outputPath, plan, encoder), cancellationToken);
+
+            var output = new FileInfo(outputPath);
+            if (encode.ExitCode == 0 && output.Exists && output.Length <= maxBytes)
+            {
+                logger.LogInformation(
+                    "Re-encoded {Path} ({DurationSeconds}s) with {Encoder} at {VideoKbps}kbps, long side up to {MaxLongSide}px",
+                    sourcePath, (int)media.DurationSeconds, encoder, plan.VideoKbps, plan.MaxLongSide);
+                return Result<string, ExtractionError>.Success(outputPath);
+            }
+
             BestEffortDelete(outputPath);
-            return Failure($"ffmpeg failed: {encode.Detail}");
+            failure = encode.ExitCode == 0 && output.Exists
+                ? $"{encoder} still came out at {output.Length / (1024 * 1024)}MB"
+                : $"{encoder} failed: {encode.Summary}";
+
+            if (encoder != VideoEncoders[^1])
+            {
+                logger.LogWarning("Falling back from {Encoder} for {Path}: {Detail}", encoder, sourcePath, failure);
+            }
         }
 
-        var sizeBytes = new FileInfo(outputPath).Length;
-        if (sizeBytes > maxBytes)
-        {
-            BestEffortDelete(outputPath);
-            return Failure($"re-encode still came out at {sizeBytes / (1024 * 1024)}MB");
-        }
-
-        return Result<string, ExtractionError>.Success(outputPath);
+        return Failure(failure);
     }
 
     /// <summary>
@@ -165,7 +181,11 @@ internal sealed class FfmpegVideoCompressor(
     /// the whole file has arrived. The scale box caps the longer side whatever the orientation and
     /// never enlarges a smaller picture.
     /// </summary>
-    internal static IReadOnlyList<string> BuildEncodeArguments(string sourcePath, string outputPath, CompressionPlan plan)
+    internal static IReadOnlyList<string> BuildEncodeArguments(
+        string sourcePath,
+        string outputPath,
+        CompressionPlan plan,
+        string encoder)
     {
         var side = plan.MaxLongSide.ToString(CultureInfo.InvariantCulture);
         var videoKbps = plan.VideoKbps.ToString(CultureInfo.InvariantCulture);
@@ -176,7 +196,8 @@ internal sealed class FfmpegVideoCompressor(
             "-i", sourcePath,
             "-map", "0:v:0", "-map", "0:a:0?",
             "-vf", $"scale='min(iw,{side})':'min(ih,{side})':force_original_aspect_ratio=decrease:force_divisible_by=2",
-            "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+            .. EncoderSettings(encoder),
+            "-pix_fmt", "yuv420p",
             "-b:v", $"{videoKbps}k", "-maxrate", $"{videoKbps}k",
             "-bufsize", $"{(plan.VideoKbps * 2).ToString(CultureInfo.InvariantCulture)}k",
         ];
@@ -188,6 +209,17 @@ internal sealed class FfmpegVideoCompressor(
         arguments.AddRange(["-movflags", "+faststart", outputPath]);
         return arguments;
     }
+
+    /// <summary>
+    /// p5 is NVENC's "slow, good quality" preset — still far faster than real time — and VBR capped at
+    /// the target rate mirrors libx264's ABR, so both land at the size the plan expects.
+    /// </summary>
+    private static IReadOnlyList<string> EncoderSettings(string encoder) => encoder switch
+    {
+        "h264_nvenc" => ["-c:v", "h264_nvenc", "-preset", "p5", "-tune", "hq", "-rc", "vbr"],
+        "libx264" => ["-c:v", "libx264", "-preset", "veryfast"],
+        _ => throw new ArgumentOutOfRangeException(nameof(encoder), encoder, "No settings for this encoder."),
+    };
 
     private static async Task<ToolRun> RunAsync(
         string executable,
@@ -263,5 +295,8 @@ internal sealed class FfmpegVideoCompressor(
         public string Detail => string.IsNullOrWhiteSpace(StandardError)
             ? $"exit code {ExitCode}"
             : StandardError.Trim();
+
+        /// <summary>ffmpeg's first error line, which names the cause; the rest is the fallout.</summary>
+        public string Summary => Detail.Split('\n', 2)[0].Trim();
     }
 }

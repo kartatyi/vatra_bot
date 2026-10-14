@@ -107,9 +107,9 @@ public class FfmpegVideoCompressorTests
     {
         var plan = new CompressionPlan(VideoKbps: 3126, AudioKbps: 128, MaxLongSide: 1920);
 
-        var arguments = FfmpegVideoCompressor.BuildEncodeArguments("in.mp4", "out.mp4", plan);
+        var arguments = FfmpegVideoCompressor.BuildEncodeArguments("in.mp4", "out.mp4", plan, "libx264");
 
-        arguments.Should().ContainInConsecutiveOrder("-c:v", "libx264");
+        arguments.Should().ContainInConsecutiveOrder("-c:v", "libx264", "-preset", "veryfast");
         arguments.Should().ContainInConsecutiveOrder("-pix_fmt", "yuv420p");
         arguments.Should().ContainInConsecutiveOrder("-b:v", "3126k");
         arguments.Should().ContainInConsecutiveOrder("-c:a", "aac", "-b:a", "128k");
@@ -118,11 +118,40 @@ public class FfmpegVideoCompressorTests
     }
 
     [Fact]
+    public void BuildEncodeArguments_Nvenc_EncodesOnTheGpuAtTheSameRate()
+    {
+        var plan = new CompressionPlan(VideoKbps: 1500, AudioKbps: 128, MaxLongSide: 1280);
+
+        var arguments = FfmpegVideoCompressor.BuildEncodeArguments("in.mp4", "out.mp4", plan, "h264_nvenc");
+
+        arguments.Should().ContainInConsecutiveOrder("-c:v", "h264_nvenc", "-preset", "p5", "-tune", "hq", "-rc", "vbr");
+        arguments.Should().ContainInConsecutiveOrder("-b:v", "1500k", "-maxrate", "1500k");
+        arguments.Should().ContainInConsecutiveOrder("-pix_fmt", "yuv420p");
+        arguments.Should().NotContain("libx264");
+    }
+
+    [Fact]
+    public void VideoEncoders_GpuFirst_CpuLastBecauseEveryFfmpegHasIt()
+    {
+        FfmpegVideoCompressor.VideoEncoders.Should().Equal("h264_nvenc", "libx264");
+    }
+
+    [Fact]
+    public void BuildEncodeArguments_UnknownEncoder_Throws()
+    {
+        var plan = new CompressionPlan(VideoKbps: 1500, AudioKbps: 128, MaxLongSide: 1280);
+
+        var build = () => FfmpegVideoCompressor.BuildEncodeArguments("in.mp4", "out.mp4", plan, "h265_magic");
+
+        build.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
     public void BuildEncodeArguments_SilentPlan_DropsTheAudioStream()
     {
         var plan = new CompressionPlan(VideoKbps: 3254, AudioKbps: 0, MaxLongSide: 1920);
 
-        var arguments = FfmpegVideoCompressor.BuildEncodeArguments("in.mp4", "out.mp4", plan);
+        var arguments = FfmpegVideoCompressor.BuildEncodeArguments("in.mp4", "out.mp4", plan, "libx264");
 
         arguments.Should().Contain("-an");
         arguments.Should().NotContain("-c:a");
@@ -133,7 +162,7 @@ public class FfmpegVideoCompressorTests
     {
         var plan = new CompressionPlan(VideoKbps: 600, AudioKbps: 128, MaxLongSide: 854);
 
-        var arguments = FfmpegVideoCompressor.BuildEncodeArguments("in.mp4", "out.mp4", plan);
+        var arguments = FfmpegVideoCompressor.BuildEncodeArguments("in.mp4", "out.mp4", plan, "libx264");
 
         arguments.Should().ContainInConsecutiveOrder(
             "-vf",
