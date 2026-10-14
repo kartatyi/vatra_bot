@@ -68,11 +68,16 @@ internal sealed class SqliteRepostEventStore(
             LastEventAt: lastAt);
     }
 
-    public async Task<IReadOnlyList<RecentFailure>> GetRecentFailuresAsync(int limit, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<RecentFailure>> GetRecentFailuresAsync(int limit, string? chatHash, CancellationToken cancellationToken)
     {
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-        return await db.RepostEvents.AsNoTracking()
-            .Where(e => e.Outcome == RepostOutcome.Failure)
+        var failures = db.RepostEvents.AsNoTracking().Where(e => e.Outcome == RepostOutcome.Failure);
+        if (chatHash is not null)
+        {
+            failures = failures.Where(e => e.ChatHash == chatHash);
+        }
+
+        return await failures
             .OrderByDescending(e => e.OccurredAt)
             .Take(limit)
             .Select(e => new RecentFailure(e.OccurredAt, e.Host, e.Url, e.ErrorVariant, e.ErrorReason, e.Extractor))
