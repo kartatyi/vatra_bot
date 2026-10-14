@@ -8,6 +8,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Telegram.Bot;
+using Telegram.Bot.Exceptions;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 
@@ -23,6 +24,7 @@ public sealed class TelegramUpdateDispatcher(
     HandleIncomingMessageHandler handler,
     RepostMetrics metrics,
     IRepostEventStore eventStore,
+    IStatsOptOutStore optOuts,
     BotHealthSignal health,
     IOptions<TelegramOptions> options,
     TimeProvider timeProvider,
@@ -38,6 +40,18 @@ public sealed class TelegramUpdateDispatcher(
 
     /// <summary>"By failure rate" ignores hosts below this many posts, so a single 1-of-1 failure can't top it.</summary>
     private const int FailureRateMinVolume = 3;
+
+    /// <summary>The default <c>/leaders</c> window; <c>/leaders all</c> lifts it.</summary>
+    private static readonly TimeSpan LeadersWindow = TimeSpan.FromDays(30);
+
+    /// <summary>How many people <c>/leaders</c> lists.</summary>
+    private const int LeadersShown = 10;
+
+    /// <summary>
+    /// How many it ranks before resolving names: a few spare, since people who left the chat drop out
+    /// at that step and the list should still fill up.
+    /// </summary>
+    private const int LeadersCandidates = 15;
 
     private readonly TelegramOptions _options = options.Value;
 
@@ -120,7 +134,9 @@ public sealed class TelegramUpdateDispatcher(
                     ChatId: message.Chat.Id,
                     MessageId: message.MessageId,
                     Text: text,
-                    SenderUsername: message.From?.Username ?? "<unknown>"),
+                    SenderUsername: message.From?.Username ?? "<unknown>",
+                    // Bots — the anonymous-admin stand-in included — and channel posts aren't people to rank.
+                    SenderId: message.From is { IsBot: false } sender ? sender.Id : null),
                 cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -156,6 +172,9 @@ public sealed class TelegramUpdateDispatcher(
             case "top":
                 await ReplyAsync(message, await BuildTopAsync(cancellationToken), cancellationToken);
                 return true;
+            case "leaders":
+                await ReplyAsync(message, await BuildLeadersAsync(message, argument, cancellationToken), cancellationToken);
+                return true;
             default:
                 return false;
         }
@@ -180,6 +199,67 @@ public sealed class TelegramUpdateDispatcher(
         var limit = ParseListSize(argument);
         var failures = await eventStore.GetRecentFailuresAsync(limit, cancellationToken);
         return DashboardReportFormatter.Failures(failures, timeProvider.GetUtcNow());
+    }
+
+    private async Task<string> BuildLeadersAsync(Message message, string? argument, CancellationToken cancellationToken)
+    {
+        var option = argument?.Trim().ToLowerInvariant();
+        if (option is "optout" or "optin")
+        {
+            if (message.From is not { IsBot: false } sender)
+            {
+                return LeaderboardFormatter.NoSender;
+            }
+
+            var optingOut = option == "optout";
+            await optOuts.SetOptedOutAsync(message.Chat.Id, sender.Id, optingOut, cancellationToken);
+            return optingOut ? LeaderboardFormatter.OptedOut : LeaderboardFormatter.OptedIn;
+        }
+
+        var allTime = option == "all";
+        var since = allTime ? DateTimeOffset.MinValue : timeProvider.GetUtcNow() - LeadersWindow;
+        var rows = await eventStore.GetSenderHostCountsAsync(ChatHasher.Of(message.Chat.Id), since, cancellationToken);
+
+        // Names are asked of Telegram now rather than stored: the journal keeps only ids, a renamed person
+        // shows their current name, and someone who left the chat drops out of the ranking.
+        var ranking = new List<(string Name, LeaderboardEntry Entry)>();
+        foreach (var entry in Leaderboard.Rank(rows, LeadersCandidates))
+        {
+            if (ranking.Count == LeadersShown)
+            {
+                break;
+            }
+
+            if (await TryGetMemberNameAsync(message.Chat.Id, entry.SenderId, cancellationToken) is { } name)
+            {
+                ranking.Add((name, entry));
+            }
+        }
+
+        return LeaderboardFormatter.Format(ranking, allTime);
+    }
+
+    /// <summary>The member's current display name, or <see langword="null"/> when they're no longer in the chat.</summary>
+    private async Task<string?> TryGetMemberNameAsync(long chatId, long userId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var member = await bot.GetChatMember(chatId, userId, cancellationToken);
+            if (member.Status is ChatMemberStatus.Left or ChatMemberStatus.Kicked)
+            {
+                return null;
+            }
+
+            return string.IsNullOrWhiteSpace(member.User.LastName)
+                ? member.User.FirstName
+                : $"{member.User.FirstName} {member.User.LastName}";
+        }
+        catch (ApiRequestException ex)
+        {
+            // "user not found" and friends: treat as gone. The id stays out of Information — it's PII.
+            logger.LogDebug(ex, "Could not resolve member {UserId} for the ranking", userId);
+            return null;
+        }
     }
 
     private async Task<string> BuildTopAsync(CancellationToken cancellationToken)

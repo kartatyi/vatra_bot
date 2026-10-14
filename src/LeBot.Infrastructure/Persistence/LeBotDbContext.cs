@@ -14,6 +14,8 @@ public sealed class LeBotDbContext(DbContextOptions<LeBotDbContext> options) : D
 {
     public DbSet<RepostEvent> RepostEvents => Set<RepostEvent>();
 
+    internal DbSet<StatsOptOutRow> StatsOptOuts => Set<StatsOptOutRow>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         var repostEvent = modelBuilder.Entity<RepostEvent>();
@@ -49,5 +51,12 @@ public sealed class LeBotDbContext(DbContextOptions<LeBotDbContext> options) : D
         repostEvent.HasIndex(e => e.OccurredAt);
         repostEvent.HasIndex(e => e.Host);
         repostEvent.HasIndex(e => e.Outcome);
+
+        // The /leaders read: one chat's reposts, grouped by who posted them.
+        repostEvent.HasIndex(e => new { e.ChatHash, e.SenderId });
+
+        var optOut = modelBuilder.Entity<StatsOptOutRow>();
+        optOut.ToTable("StatsOptOuts");
+        optOut.HasKey(o => new { o.ChatHash, o.UserId });
     }
 }

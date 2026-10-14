@@ -134,6 +134,64 @@ public sealed class SqliteRepostEventStoreQueryTests : IDisposable
     }
 
     [Fact]
+    public async Task GetSenderHostCountsAsync_CountsOneChatsRepostsPerPersonAndHost()
+    {
+        await SeedAsync(
+            Event(RepostOutcome.MediaRepost, host: "tiktok.com", sender: 1),
+            Event(RepostOutcome.TextFallback, host: "tiktok.com", sender: 1),
+            Event(RepostOutcome.MediaRepost, host: "x.com", sender: 1),
+            Event(RepostOutcome.MediaRepost, host: "x.com", sender: 2),
+            Event(RepostOutcome.Failure, host: "x.com", sender: 2),
+            Event(RepostOutcome.MediaRepost, host: "x.com", sender: null),
+            Event(RepostOutcome.MediaRepost, host: "x.com", sender: 3, chatHash: "chat-b"));
+
+        var rows = await _sut.GetSenderHostCountsAsync("chat-a", DateTimeOffset.MinValue, CancellationToken.None);
+
+        rows.Should().BeEquivalentTo(new SenderHostCount[]
+        {
+            new(1, "tiktok.com", 2),
+            new(1, "x.com", 1),
+            new(2, "x.com", 1),
+        });
+    }
+
+    [Fact]
+    public async Task GetSenderHostCountsAsync_HonoursTheWindow()
+    {
+        await SeedAsync(
+            Event(occurredAt: BaseInstant.AddDays(-40), sender: 1),
+            Event(occurredAt: BaseInstant, sender: 1));
+
+        var rows = await _sut.GetSenderHostCountsAsync("chat-a", BaseInstant.AddDays(-30), CancellationToken.None);
+
+        rows.Should().ContainSingle().Which.Reposts.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task GetSenderHostCountsAsync_LeavesOutWhoOptedOutOfThatChat()
+    {
+        await SeedAsync(
+            Event(sender: 1),
+            Event(sender: 2),
+            Event(sender: 2, chatHash: "chat-b"));
+        await OptOutAsync(chatHash: "chat-a", userId: 2);
+
+        var inA = await _sut.GetSenderHostCountsAsync("chat-a", DateTimeOffset.MinValue, CancellationToken.None);
+        var inB = await _sut.GetSenderHostCountsAsync("chat-b", DateTimeOffset.MinValue, CancellationToken.None);
+
+        inA.Select(r => r.SenderId).Should().Equal(1);
+        inB.Select(r => r.SenderId).Should().Equal(2);
+    }
+
+    // These tests seed by chat hash, while the opt-out store takes a raw chat id — so write the row directly.
+    private async Task OptOutAsync(string chatHash, long userId)
+    {
+        await using var db = new LeBotDbContext(_options);
+        db.StatsOptOuts.Add(new StatsOptOutRow { ChatHash = chatHash, UserId = userId });
+        await db.SaveChangesAsync();
+    }
+
+    [Fact]
     public async Task GetRecentFailuresAsync_ProjectsErrorDetail()
     {
         await SeedAsync(Event(
@@ -299,7 +357,8 @@ public sealed class SqliteRepostEventStoreQueryTests : IDisposable
         string? errorVariant = null,
         string? errorReason = null,
         string? url = null,
-        string version = "1.0.0") =>
+        string version = "1.0.0",
+        long? sender = null) =>
         new(
             OccurredAt: occurredAt ?? BaseInstant,
             Host: host,
@@ -312,7 +371,8 @@ public sealed class SqliteRepostEventStoreQueryTests : IDisposable
             MediaBytes: outcome == RepostOutcome.MediaRepost ? 1024 : null,
             ElapsedMs: elapsedMs,
             BotVersion: version,
-            ChatHash: chatHash);
+            ChatHash: chatHash,
+            SenderId: sender);
 
     public void Dispose()
     {
