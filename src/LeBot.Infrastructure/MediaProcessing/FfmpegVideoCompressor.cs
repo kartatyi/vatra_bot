@@ -1,5 +1,3 @@
-using System.ComponentModel;
-using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using LeBot.Domain.Common;
@@ -12,13 +10,11 @@ namespace LeBot.Infrastructure.MediaProcessing;
 
 /// <summary>
 /// Shrinks a video with ffmpeg: ffprobe reads its length, <see cref="CompressionPlan"/> turns that into
-/// a bitrate that fits the cap, and the GPU — else libx264 — re-encodes at it. Both tools are looked for where yt-dlp
-/// already finds ffmpeg — <see cref="YtDlpOptions.FfmpegPath"/>, else beside the yt-dlp binary. A missing
-/// tool fails the compression, never the repost: the caller falls back to a text reply.
+/// a bitrate that fits the cap, and the GPU — else libx264 — re-encodes at it. Both tools are looked for
+/// where yt-dlp already finds ffmpeg — <see cref="YtDlpOptions.FfmpegPath"/>, else beside the yt-dlp
+/// binary. A missing tool fails the compression, never the repost: the caller falls back to a text reply.
 /// </summary>
-internal sealed class FfmpegVideoCompressor(
-    IOptions<YtDlpOptions> options,
-    ILogger<FfmpegVideoCompressor> logger) : IVideoCompressor
+internal sealed class FfmpegVideoCompressor : IVideoCompressor
 {
     /// <summary>
     /// Updates are handled one at a time, so an encode holds up every chat behind it. On the PC the bot
@@ -28,14 +24,44 @@ internal sealed class FfmpegVideoCompressor(
     internal static readonly TimeSpan Timeout = TimeSpan.FromMinutes(2);
 
     /// <summary>
+    /// How long the GPU gets before libx264 takes over. NVENC does a two-minute reel in a second or two,
+    /// so one still running after this is wedged — a driver fault, a card held by something else — not
+    /// slow, and the CPU still has most of <see cref="Timeout"/> left to do the job.
+    /// </summary>
+    internal static readonly TimeSpan HardwareEncoderTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>
     /// Tried in order. NVENC encodes on the GPU in a second or two where libx264 spends ~10 s of CPU,
     /// but it needs an NVIDIA card, a driver new enough for this ffmpeg build and a free encoder
     /// session. Missing any of them it refuses within a fraction of a second, and libx264 — built into
-    /// every ffmpeg — takes over.
+    /// every ffmpeg — takes over. So does it when the GPU errors, hangs or overshoots the cap.
     /// </summary>
     internal static readonly IReadOnlyList<string> VideoEncoders = ["h264_nvenc", "libx264"];
 
-    private readonly string _ffmpegPath = ResolveFfmpegPath(options.Value);
+    private readonly string _ffmpegPath;
+    private readonly TimeProvider _timeProvider;
+    private readonly ToolRunner _runTool;
+    private readonly ILogger<FfmpegVideoCompressor> _logger;
+
+    public FfmpegVideoCompressor(
+        IOptions<YtDlpOptions> options,
+        TimeProvider timeProvider,
+        ILogger<FfmpegVideoCompressor> logger)
+        : this(options, timeProvider, ProcessToolRunner.RunAsync, logger)
+    {
+    }
+
+    internal FfmpegVideoCompressor(
+        IOptions<YtDlpOptions> options,
+        TimeProvider timeProvider,
+        ToolRunner runTool,
+        ILogger<FfmpegVideoCompressor> logger)
+    {
+        _ffmpegPath = ResolveFfmpegPath(options.Value);
+        _timeProvider = timeProvider;
+        _runTool = runTool;
+        _logger = logger;
+    }
 
     public async Task<Result<string, ExtractionError>> CompressAsync(
         string sourcePath,
@@ -46,12 +72,12 @@ internal sealed class FfmpegVideoCompressor(
             Path.GetDirectoryName(Path.GetFullPath(sourcePath)) ?? Path.GetTempPath(),
             Path.GetFileNameWithoutExtension(sourcePath) + ".fit.mp4");
 
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(Timeout);
+        using var deadline = new CancellationTokenSource(Timeout, _timeProvider);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
 
         try
         {
-            return await CompressCoreAsync(sourcePath, outputPath, maxBytes, timeout.Token);
+            return await CompressCoreAsync(sourcePath, outputPath, maxBytes, linked.Token);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -71,7 +97,7 @@ internal sealed class FfmpegVideoCompressor(
         long maxBytes,
         CancellationToken cancellationToken)
     {
-        var probe = await RunAsync(SiblingTool(_ffmpegPath, "ffprobe"), BuildProbeArguments(sourcePath), cancellationToken);
+        var probe = await _runTool(SiblingTool(_ffmpegPath, "ffprobe"), BuildProbeArguments(sourcePath), cancellationToken);
         if (probe.ExitCode != 0)
         {
             return Failure($"ffprobe failed: {probe.Detail}");
@@ -91,13 +117,16 @@ internal sealed class FfmpegVideoCompressor(
         var failure = string.Empty;
         foreach (var encoder in VideoEncoders)
         {
-            var encode = await RunAsync(
-                _ffmpegPath, BuildEncodeArguments(sourcePath, outputPath, plan, encoder), cancellationToken);
+            var isLastResort = encoder == VideoEncoders[^1];
+            var arguments = BuildEncodeArguments(sourcePath, outputPath, plan, encoder);
+            var encode = isLastResort
+                ? await _runTool(_ffmpegPath, arguments, cancellationToken)
+                : await RunWithinHardwareBudgetAsync(arguments, cancellationToken);
 
             var output = new FileInfo(outputPath);
             if (encode.ExitCode == 0 && output.Exists && output.Length <= maxBytes)
             {
-                logger.LogInformation(
+                _logger.LogInformation(
                     "Re-encoded {Path} ({DurationSeconds}s) with {Encoder} at {VideoKbps}kbps, long side up to {MaxLongSide}px",
                     sourcePath, (int)media.DurationSeconds, encoder, plan.VideoKbps, plan.MaxLongSide);
                 return Result<string, ExtractionError>.Success(outputPath);
@@ -108,13 +137,34 @@ internal sealed class FfmpegVideoCompressor(
                 ? $"{encoder} still came out at {output.Length / (1024 * 1024)}MB"
                 : $"{encoder} failed: {encode.Summary}";
 
-            if (encoder != VideoEncoders[^1])
+            if (!isLastResort)
             {
-                logger.LogWarning("Falling back from {Encoder} for {Path}: {Detail}", encoder, sourcePath, failure);
+                _logger.LogWarning("Falling back from {Encoder} for {Path}: {Detail}", encoder, sourcePath, failure);
             }
         }
 
         return Failure(failure);
+    }
+
+    /// <summary>
+    /// Runs a hardware encode under <see cref="HardwareEncoderTimeout"/>. Running out of it is a failed
+    /// attempt, not a cancelled compression: the encoder is killed and the next one gets its turn.
+    /// </summary>
+    private async Task<ToolRun> RunWithinHardwareBudgetAsync(
+        IReadOnlyList<string> arguments,
+        CancellationToken cancellationToken)
+    {
+        using var budget = new CancellationTokenSource(HardwareEncoderTimeout, _timeProvider);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, budget.Token);
+
+        try
+        {
+            return await _runTool(_ffmpegPath, arguments, linked.Token);
+        }
+        catch (OperationCanceledException) when (budget.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            return new ToolRun(-1, string.Empty, $"did not finish within {HardwareEncoderTimeout.TotalSeconds:0}s");
+        }
     }
 
     /// <summary>
@@ -221,62 +271,6 @@ internal sealed class FfmpegVideoCompressor(
         _ => throw new ArgumentOutOfRangeException(nameof(encoder), encoder, "No settings for this encoder."),
     };
 
-    private static async Task<ToolRun> RunAsync(
-        string executable,
-        IEnumerable<string> arguments,
-        CancellationToken cancellationToken)
-    {
-        var startInfo = new ProcessStartInfo(executable)
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-        };
-        foreach (var argument in arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
-
-        using var process = new Process { StartInfo = startInfo };
-        try
-        {
-            process.Start();
-        }
-        catch (Win32Exception ex)
-        {
-            // The binary is not where the path says — the process never started.
-            return new ToolRun(-1, string.Empty, $"could not start {executable}: {ex.Message}");
-        }
-
-        var standardOutput = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var standardError = process.StandardError.ReadToEndAsync(cancellationToken);
-
-        try
-        {
-            await process.WaitForExitAsync(cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            // WaitForExitAsync stops waiting but leaves the encoder running, still writing the file.
-            KillQuietly(process);
-            throw;
-        }
-
-        return new ToolRun(process.ExitCode, await standardOutput, await standardError);
-    }
-
-    private static void KillQuietly(Process process)
-    {
-        try
-        {
-            process.Kill(entireProcessTree: true);
-            process.WaitForExit(TimeSpan.FromSeconds(5));
-        }
-        catch (InvalidOperationException) { }
-        catch (Win32Exception) { }
-    }
-
     private static void BestEffortDelete(string filePath)
     {
         try
@@ -289,14 +283,4 @@ internal sealed class FfmpegVideoCompressor(
 
     private static Result<string, ExtractionError> Failure(string detail) =>
         Result<string, ExtractionError>.Failure(new ExtractionError.ToolFailure(detail));
-
-    private sealed record ToolRun(int ExitCode, string StandardOutput, string StandardError)
-    {
-        public string Detail => string.IsNullOrWhiteSpace(StandardError)
-            ? $"exit code {ExitCode}"
-            : StandardError.Trim();
-
-        /// <summary>ffmpeg's first error line, which names the cause; the rest is the fallout.</summary>
-        public string Summary => Detail.Split('\n', 2)[0].Trim();
-    }
 }

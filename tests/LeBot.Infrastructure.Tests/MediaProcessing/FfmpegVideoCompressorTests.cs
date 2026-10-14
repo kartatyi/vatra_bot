@@ -175,6 +175,7 @@ public class FfmpegVideoCompressorTests
         var missing = Path.Combine(Path.GetTempPath(), "lebot-no-such-dir", "ffmpeg.exe");
         var sut = new FfmpegVideoCompressor(
             Options.Create(new YtDlpOptions { FfmpegPath = missing }),
+            TimeProvider.System,
             NullLogger<FfmpegVideoCompressor>.Instance);
 
         var result = await sut.CompressAsync(
