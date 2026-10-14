@@ -28,4 +28,22 @@ public class MediaPayloadTests
 
         payload.HasMedia.Should().BeTrue();
     }
+
+    [Theory]
+    [InlineData("post", "title", "me", "post|| me")]
+    [InlineData(null, "title", "me", "title|| me")]
+    [InlineData("  ", "title", null, "title")]
+    [InlineData(null, null, "me", "— me")]
+    public void Body_PrefersDescription_ThenTitle_ThenAppendsAuthor(string? description, string? title, string? author, string expected)
+    {
+        var payload = new MediaPayload(new Uri("https://example.com"), title, author, [], description);
+
+        payload.Body.Should().Be(expected.Replace("|| ", "\n\n— ", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Body_NothingToSay_IsNull()
+    {
+        new MediaPayload(new Uri("https://example.com"), " ", null, []).Body.Should().BeNull();
+    }
 }
