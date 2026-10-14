@@ -7,12 +7,22 @@ public class CompressionPlanTests
     private const long FiftyMb = 50L * 1024 * 1024;
 
     [Fact]
-    public void For_TwoMinuteReelOverCap_SpendsTheCapOnVideoAfterAudio()
+    public void For_TwoMinuteReelOverCap_StopsAtTheBitrateCeilingInsteadOfFillingTheCap()
     {
-        // The reel that started this: 116 s, h264 + AAC, 53 MB against Telegram's 50 MB.
+        // The reel that started this: 116 s, h264 + AAC, 53 MB against Telegram's 50 MB. The cap
+        // would allow ~3100 kbps; the ceiling halves the upload instead.
         var plan = CompressionPlan.For(116, hasAudio: true, FiftyMb);
 
-        plan.Should().Be(new CompressionPlan(VideoKbps: 3126, AudioKbps: 128, MaxLongSide: 1920));
+        plan.Should().Be(new CompressionPlan(VideoKbps: 1500, AudioKbps: 128, MaxLongSide: 1280));
+    }
+
+    [Fact]
+    public void For_LongVideo_FillsTheCapBelowTheCeiling()
+    {
+        // 300 s leaves ~1258 kbps in total, under the ceiling, so the cap is the limit.
+        var plan = CompressionPlan.For(300, hasAudio: true, FiftyMb);
+
+        plan.Should().Be(new CompressionPlan(VideoKbps: 1130, AudioKbps: 128, MaxLongSide: 1280));
     }
 
     [Theory]
@@ -32,14 +42,14 @@ public class CompressionPlanTests
     [Fact]
     public void For_SilentVideo_GivesTheAudioShareToVideo()
     {
-        var plan = CompressionPlan.For(116, hasAudio: false, FiftyMb);
+        var plan = CompressionPlan.For(300, hasAudio: false, FiftyMb);
 
-        plan.Should().Be(new CompressionPlan(VideoKbps: 3254, AudioKbps: 0, MaxLongSide: 1920));
+        plan.Should().Be(new CompressionPlan(VideoKbps: 1258, AudioKbps: 0, MaxLongSide: 1280));
     }
 
     [Theory]
-    [InlineData(120, 1920)] // ~3000 kbps — full HD holds up
-    [InlineData(240, 1280)] // ~1450 kbps — 720p
+    [InlineData(120, 1280)] // at the 1500 kbps ceiling — 720p
+    [InlineData(300, 1280)] // ~1130 kbps — still 720p
     [InlineData(500, 854)]  // ~630 kbps — 480p, or the picture turns to blocks
     public void For_FallingBitrate_ShrinksThePicture(double durationSeconds, int expectedLongSide)
     {

@@ -12,7 +12,7 @@ namespace LeBot.Infrastructure.MediaProcessing;
 
 /// <summary>
 /// Shrinks a video with ffmpeg: ffprobe reads its length, <see cref="CompressionPlan"/> turns that into
-/// the bitrate that fills the cap, and libx264 re-encodes at it. Both tools are looked for where yt-dlp
+/// a bitrate that fits the cap, and libx264 re-encodes at it. Both tools are looked for where yt-dlp
 /// already finds ffmpeg — <see cref="YtDlpOptions.FfmpegPath"/>, else beside the yt-dlp binary. A missing
 /// tool fails the compression, never the repost: the caller falls back to a text reply.
 /// </summary>
