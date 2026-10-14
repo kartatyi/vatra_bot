@@ -1,5 +1,6 @@
 using System.Globalization;
 using LeBot.Application.Metrics;
+using LeBot.Application.Ports;
 using LeBot.Application.Telemetry;
 using LeBot.Application.UseCases.HandleIncomingMessage;
 using LeBot.Infrastructure.Configuration;
@@ -23,6 +24,7 @@ public sealed class TelegramUpdateDispatcher(
     HandleIncomingMessageHandler handler,
     RepostMetrics metrics,
     IRepostEventStore eventStore,
+    IAppVersion appVersion,
     BotHealthSignal health,
     IOptions<TelegramOptions> options,
     TimeProvider timeProvider,
@@ -144,8 +146,11 @@ public sealed class TelegramUpdateDispatcher(
         switch (command.ToLowerInvariant())
         {
             case "ping":
-            case "start":
                 await ReplyAsync(message, "🟢 OK", cancellationToken);
+                return true;
+            case "start":
+            case "help":
+                await ReplyAsync(message, await BuildHelpAsync(message.From?.LanguageCode, cancellationToken), cancellationToken);
                 return true;
             case "stats":
                 await ReplyAsync(message, await BuildStatsAsync(cancellationToken), cancellationToken);
@@ -167,6 +172,25 @@ public sealed class TelegramUpdateDispatcher(
             text: text,
             replyParameters: new ReplyParameters { MessageId = original.MessageId },
             cancellationToken: cancellationToken);
+
+    private async Task<string> BuildHelpAsync(string? languageCode, CancellationToken cancellationToken)
+    {
+        // Telegram answers a language with no dedicated copy with an empty one rather than the default,
+        // so fall back by hand: the asker's language first, then the language-less default.
+        var description = (await bot.GetMyDescription(languageCode, cancellationToken)).Description;
+        if (string.IsNullOrWhiteSpace(description) && languageCode is not null)
+        {
+            description = (await bot.GetMyDescription(cancellationToken: cancellationToken)).Description;
+        }
+
+        var commands = await bot.GetMyCommands(languageCode: languageCode, cancellationToken: cancellationToken);
+        if (commands.Length == 0 && languageCode is not null)
+        {
+            commands = await bot.GetMyCommands(cancellationToken: cancellationToken);
+        }
+
+        return HelpReportFormatter.Help(description, commands, appVersion.Current);
+    }
 
     private async Task<string> BuildStatsAsync(CancellationToken cancellationToken)
     {
