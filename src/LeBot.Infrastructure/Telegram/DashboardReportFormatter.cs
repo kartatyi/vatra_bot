@@ -61,17 +61,17 @@ internal static class DashboardReportFormatter
     }
 
     /// <summary>
-    /// <c>/failures</c>: the most recent broken links, each with the error the extractor reported.
+    /// <c>/failures</c>: the asking chat's most recent broken links, each with the error the extractor reported.
     /// </summary>
     public static string Failures(IReadOnlyList<RecentFailure> failures, DateTimeOffset now)
     {
         if (failures.Count == 0)
         {
-            return "No failures recorded 🎉";
+            return "No failures in this chat 🎉";
         }
 
         var sb = new StringBuilder();
-        sb.Append("🚫 Last ").Append(Num(failures.Count)).Append(" failure(s)\n");
+        sb.Append("🚫 Last ").Append(Num(failures.Count)).Append(" failure(s) in this chat\n");
         foreach (var failure in failures)
         {
             sb.Append('\n').Append(Age(failure.OccurredAt, now)).Append(" · ").Append(failure.Host).Append('\n');

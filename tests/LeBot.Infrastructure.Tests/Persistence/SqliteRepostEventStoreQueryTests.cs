@@ -126,11 +126,35 @@ public sealed class SqliteRepostEventStoreQueryTests : IDisposable
             Event(RepostOutcome.Failure, occurredAt: BaseInstant.AddMinutes(3)),
             Event(RepostOutcome.MediaRepost, occurredAt: BaseInstant.AddMinutes(4)));
 
-        var failures = await _sut.GetRecentFailuresAsync(limit: 2, CancellationToken.None);
+        var failures = await _sut.GetRecentFailuresAsync(limit: 2, chatHash: null, CancellationToken.None);
 
         failures.Should().HaveCount(2);
         failures.Select(f => f.OccurredAt).Should().ContainInOrder(
             BaseInstant.AddMinutes(3), BaseInstant.AddMinutes(2));
+    }
+
+    [Fact]
+    public async Task GetRecentFailuresAsync_WithChatHash_ReturnsOnlyThatChatsFailures()
+    {
+        await SeedAsync(
+            Event(RepostOutcome.Failure, chatHash: "chat-a", url: "https://tiktok.com/p/a"),
+            Event(RepostOutcome.Failure, chatHash: "chat-b", url: "https://tiktok.com/p/b"));
+
+        var failures = await _sut.GetRecentFailuresAsync(limit: 5, chatHash: "chat-a", CancellationToken.None);
+
+        failures.Should().ContainSingle().Which.Url.Should().Be("https://tiktok.com/p/a");
+    }
+
+    [Fact]
+    public async Task GetRecentFailuresAsync_WithoutChatHash_SpansEveryChat()
+    {
+        await SeedAsync(
+            Event(RepostOutcome.Failure, chatHash: "chat-a"),
+            Event(RepostOutcome.Failure, chatHash: "chat-b"));
+
+        var failures = await _sut.GetRecentFailuresAsync(limit: 5, chatHash: null, CancellationToken.None);
+
+        failures.Should().HaveCount(2);
     }
 
     [Fact]
@@ -144,7 +168,7 @@ public sealed class SqliteRepostEventStoreQueryTests : IDisposable
             errorReason: "login required",
             url: "https://instagram.com/p/broken"));
 
-        var failure = (await _sut.GetRecentFailuresAsync(limit: 5, CancellationToken.None)).Single();
+        var failure = (await _sut.GetRecentFailuresAsync(limit: 5, chatHash: null, CancellationToken.None)).Single();
 
         failure.Host.Should().Be("instagram.com");
         failure.Url.Should().Be("https://instagram.com/p/broken");

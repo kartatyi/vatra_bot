@@ -156,7 +156,7 @@ public sealed class TelegramUpdateDispatcher(
                 await ReplyAsync(message, await BuildStatsAsync(cancellationToken), cancellationToken);
                 return true;
             case "failures":
-                await ReplyAsync(message, await BuildFailuresAsync(argument, cancellationToken), cancellationToken);
+                await ReplyAsync(message, await BuildFailuresAsync(message.Chat.Id, argument, cancellationToken), cancellationToken);
                 return true;
             case "top":
                 await ReplyAsync(message, await BuildTopAsync(cancellationToken), cancellationToken);
@@ -199,10 +199,13 @@ public sealed class TelegramUpdateDispatcher(
         return DashboardReportFormatter.Stats(metrics, uptime, allTime);
     }
 
-    private async Task<string> BuildFailuresAsync(string? argument, CancellationToken cancellationToken)
+    private async Task<string> BuildFailuresAsync(long chatId, string? argument, CancellationToken cancellationToken)
     {
         var limit = ParseListSize(argument);
-        var failures = await eventStore.GetRecentFailuresAsync(limit, cancellationToken);
+
+        // Scoped to the asking chat: a failure row carries the full URL someone posted, and one group
+        // has no business reading another's.
+        var failures = await eventStore.GetRecentFailuresAsync(limit, ChatHasher.Of(chatId), cancellationToken);
         return DashboardReportFormatter.Failures(failures, timeProvider.GetUtcNow());
     }
 
