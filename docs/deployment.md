@@ -309,6 +309,12 @@ C:\LeBot\LeBot.Dashboard.exe --urls "http://127.0.0.1:8080"                  # c
 
 If the database doesn't exist yet (the bot has never run), the page loads with a "journal not found" notice rather than an error — start the bot and refresh.
 
+The dashboard writes its own log beside the exe, `logs\dashboard-<date>.log` (seven days kept), apart from the bot's `lebot-<date>.log`. When the page loads but its data panels stay empty, an `/api/*` call is failing with a 500 — the stack is in that file:
+
+```powershell
+Select-String -Path C:\LeBot\logs\dashboard-*.log -Pattern '\[ERR\]' -Context 0,20
+```
+
 ## 11. Manual local test (developer machine, e.g. `D:\lebot`)
 
 To run the bot and dashboard by hand on your own machine — no Scheduled Task, no `--install`:

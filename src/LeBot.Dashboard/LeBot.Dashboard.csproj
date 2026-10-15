@@ -14,6 +14,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Serilog.Extensions.Hosting" />
+    <PackageReference Include="Serilog.Sinks.Console" />
+    <PackageReference Include="Serilog.Sinks.File" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- The single-page UI, baked into the binary so the reader is one self-contained exe with no
          wwwroot to copy. LogicalName pins the manifest name DashboardPage reads. -->
     <EmbeddedResource Include="dashboard.html" LogicalName="dashboard.html" />
