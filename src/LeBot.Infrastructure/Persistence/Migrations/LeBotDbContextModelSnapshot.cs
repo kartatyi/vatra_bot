@@ -80,6 +80,26 @@ namespace LeBot.Infrastructure.Persistence.Migrations
                     b.ToTable("RepostEvents", (string)null);
                 });
 
+            modelBuilder.Entity("LeBot.Infrastructure.MediaCache.StoredPostRow", b =>
+                {
+                    b.Property<string>("LinkKey")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Document")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("StoredAt")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("LinkKey");
+
+                    b.HasIndex("StoredAt");
+
+                    b.ToTable("StoredPosts", (string)null);
+                });
+
             modelBuilder.Entity("LeBot.Infrastructure.Persistence.ChatSettingsRow", b =>
                 {
                     b.Property<string>("ChatHash")

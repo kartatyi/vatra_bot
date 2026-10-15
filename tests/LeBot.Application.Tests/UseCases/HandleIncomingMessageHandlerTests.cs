@@ -27,9 +27,15 @@ public class HandleIncomingMessageHandlerTests
 
     // Full/Full shapes nothing, so the tests that aren't about captions can assert on the payload
     // the extractor returned; the caption tests below set their own settings.
-    public HandleIncomingMessageHandlerTests() =>
+    public HandleIncomingMessageHandlerTests()
+    {
         _settings.GetAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
             .Returns(new ChatSettings(CaptionMode.Full, CaptionMode.Full));
+
+        // A store that sends what it was given — the disk store's behaviour.
+        _cache.SaveAsync(Arg.Any<MediaPayload>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<MediaPayload>());
+    }
 
     private HandleIncomingMessageHandler CreateSut() =>
         new(_urlExtractor, [_extractor], _cache, _seenLinks, _settings, _revealable, _messenger, _metrics, _journal, _time, _logger);
@@ -315,6 +321,25 @@ public class HandleIncomingMessageHandlerTests
 
         await _messenger.Received(1).ReplyWithMediaAsync(
             123L, 7, stored with { Description = "Nice clip", RevealableText = stored.Body }, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleAsync_FreshMedia_SendsThePostTheStoreHandsBack()
+    {
+        var url = new Uri("https://example.com/x");
+        var downloaded = VideoPayload(url);
+        var stored = downloaded with
+        {
+            Items = [new MediaItem(string.Empty, MediaKind.Video, null, null, null) { TelegramFileId = "vid-1" }],
+            RetainFiles = true,
+        };
+        ArrangeExtraction(url, downloaded);
+        _cache.SaveAsync(downloaded, Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(stored);
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        // Uploaded once, to the storage chat; the chat gets it by file id.
+        await _messenger.Received(1).ReplyWithMediaAsync(123L, 7, stored, Arg.Any<CancellationToken>());
     }
 
     [Fact]

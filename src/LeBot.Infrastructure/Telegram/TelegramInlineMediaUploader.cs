@@ -1,68 +1,37 @@
 using LeBot.Application.Ports;
 using LeBot.Domain.Media;
-using LeBot.Infrastructure.Configuration;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using Telegram.Bot;
-using Telegram.Bot.Exceptions;
-using Telegram.Bot.Types;
 
 namespace LeBot.Infrastructure.Telegram;
 
 /// <summary>
-/// <see cref="IInlineMediaUploader"/> over the storage chat from <see cref="InlineOptions"/>. Only the
-/// first item goes up: an inline result is a single file — Telegram has no inline albums.
+/// <see cref="IInlineMediaUploader"/> over the storage chat (<see cref="TelegramMediaVault"/>). Only the
+/// first item counts: an inline result is a single file — Telegram has no inline albums. A payload the
+/// media cache already put in Telegram goes through without a second upload.
 /// </summary>
-internal sealed class TelegramInlineMediaUploader(
-    ITelegramBotClient bot,
-    IOptions<InlineOptions> options,
-    ILogger<TelegramInlineMediaUploader> logger) : IInlineMediaUploader
+internal sealed class TelegramInlineMediaUploader(TelegramMediaVault vault) : IInlineMediaUploader
 {
     public async Task<(MediaKind Kind, string FileId)?> UploadAsync(MediaPayload payload, CancellationToken cancellationToken)
     {
-        try
+        var first = payload with { Items = payload.Items.Take(1).ToList() };
+        if (await vault.StoreAsync(first, cancellationToken) is [{ TelegramFileId: { } fileId } item])
         {
-            if (options.Value.StorageChatId is not { } storage)
-            {
-                logger.LogWarning("Inline media can't be uploaded: Inline:StorageChatId is not set");
-                return null;
-            }
-
-            var item = payload.Items[0];
-            await using var stream = File.OpenRead(item.FilePath);
-            var file = InputFile.FromStream(stream, Path.GetFileName(item.FilePath));
-
-            var fileId = item.Kind switch
-            {
-                MediaKind.Video => (await bot.SendVideo(storage, file, duration: item.DurationSeconds, supportsStreaming: true, cancellationToken: cancellationToken)).Video?.FileId,
-                MediaKind.Photo => (await bot.SendPhoto(storage, file, cancellationToken: cancellationToken)).Photo?.LastOrDefault()?.FileId,
-                MediaKind.Animation => (await bot.SendAnimation(storage, file, cancellationToken: cancellationToken)).Animation?.FileId,
-                MediaKind.Audio => (await bot.SendAudio(storage, file, cancellationToken: cancellationToken)).Audio?.FileId,
-                _ => null,
-            };
-
-            return fileId is null ? null : (item.Kind, fileId);
+            DeleteDownloads(payload);
+            return (item.Kind, fileId);
         }
-        catch (RequestException ex)
-        {
-            logger.LogWarning(ex, "Uploading inline media for {Url} failed", payload.SourceUrl);
-            return null;
-        }
-        finally
-        {
-            DeleteUnlessRetained(payload);
-        }
+
+        DeleteDownloads(payload);
+        return null;
     }
 
-    /// <summary>Downloads are throw-away once uploaded; the media cache's own copies are not (see <see cref="MediaPayload.RetainFiles"/>).</summary>
-    private void DeleteUnlessRetained(MediaPayload payload)
+    /// <summary>Downloads are throw-away once the upload is done or has failed; store-owned files are not touched.</summary>
+    private static void DeleteDownloads(MediaPayload payload)
     {
         if (payload.RetainFiles)
         {
             return;
         }
 
-        foreach (var item in payload.Items)
+        foreach (var item in payload.Items.Where(i => i.FilePath.Length > 0))
         {
             try
             {
@@ -70,7 +39,7 @@ internal sealed class TelegramInlineMediaUploader(
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                logger.LogDebug(ex, "Could not delete {Path}", item.FilePath);
+                // Best-effort: the downloads sweep empties the folder hourly anyway.
             }
         }
     }

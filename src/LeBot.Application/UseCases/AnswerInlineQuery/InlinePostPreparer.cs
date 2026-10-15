@@ -105,8 +105,7 @@ public sealed class InlinePostPreparer(
             {
                 case Result<MediaPayload, ExtractionError>.Ok ok when ok.Value.HasMedia:
                     // Cache before the upload deletes the downloaded files — same order as a group repost.
-                    await cache.SaveAsync(ok.Value, extractor.GetType().Name, cancellationToken);
-                    return ok.Value;
+                    return await cache.SaveAsync(ok.Value, extractor.GetType().Name, cancellationToken);
                 case Result<MediaPayload, ExtractionError>.Ok ok when ok.Value.Body is not null:
                     textOnly ??= ok.Value;
                     break;

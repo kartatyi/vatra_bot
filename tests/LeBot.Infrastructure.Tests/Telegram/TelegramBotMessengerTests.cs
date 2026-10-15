@@ -48,6 +48,19 @@ public sealed class TelegramBotMessengerTests : IDisposable
         keyboard.InlineKeyboard.Single().Single().CallbackData == RevealButton.CallbackData;
 
     [Fact]
+    public async Task ReplyWithMediaAsync_ItemAlreadyInTelegram_IsSentByFileId()
+    {
+        var item = new MediaItem(string.Empty, MediaKind.Video, null, null, null) { TelegramFileId = "vid-1" };
+        var payload = new MediaPayload(Source, null, null, [item], RetainFiles: true);
+
+        await CreateSut().ReplyWithMediaAsync(1L, 2, payload, CancellationToken.None);
+
+        await _bot.Received(1).SendRequest(
+            Arg.Is<SendVideoRequest>(r => r.Video is InputFileId && ((InputFileId)r.Video).Id == "vid-1"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task ReplyWithMediaAsync_NothingHeldBack_SendsNoButton()
     {
         var payload = new MediaPayload(Source, null, null, [Video(WriteFile("clip.mp4"))]);

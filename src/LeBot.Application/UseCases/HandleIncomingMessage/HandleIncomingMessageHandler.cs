@@ -132,8 +132,8 @@ public sealed class HandleIncomingMessageHandler(
                     // Cache first: the messenger deletes the files it was handed once the upload
                     // finishes, so after the send there is nothing left to copy. The cache keeps the
                     // full text; each chat's caption settings shape it on the way out.
-                    await cache.SaveAsync(ok.Value, extractorName, cancellationToken);
-                    await ReplyWithMediaAsync(message, settings.ShapeCaption(ok.Value), cancellationToken);
+                    var stored = await cache.SaveAsync(ok.Value, extractorName, cancellationToken);
+                    await ReplyWithMediaAsync(message, settings.ShapeCaption(stored), cancellationToken);
                     metrics.RecordMediaRepost(extractorName);
                     await journal.RecordMediaRepostAsync(
                         url, extractorName, ok.Value.Items.Count, TotalBytes(ok.Value),

@@ -195,9 +195,17 @@ public sealed class TelegramBotMessenger(
             for (var i = 0; i < batch.Count; i++)
             {
                 var item = batch[i];
-                var stream = File.OpenRead(item.FilePath);
-                streams.Add(stream);
-                var inputFile = InputFile.FromStream(stream, Path.GetFileName(item.FilePath));
+                InputFile inputFile;
+                if (item.TelegramFileId is { } fileId)
+                {
+                    inputFile = InputFile.FromFileId(fileId);
+                }
+                else
+                {
+                    var stream = File.OpenRead(item.FilePath);
+                    streams.Add(stream);
+                    inputFile = InputFile.FromStream(stream, Path.GetFileName(item.FilePath));
+                }
                 var itemCaption = i == 0 ? caption : null;
 
                 IAlbumInputMedia media = item.Kind switch
@@ -251,8 +259,11 @@ public sealed class TelegramBotMessenger(
         InlineKeyboardMarkup? keyboard,
         CancellationToken cancellationToken)
     {
-        await using var stream = File.OpenRead(item.FilePath);
-        var inputFile = InputFile.FromStream(stream, Path.GetFileName(item.FilePath));
+        // Media the storage chat already holds is sent by id — no file to open, nothing to upload.
+        await using var stream = item.TelegramFileId is null ? File.OpenRead(item.FilePath) : null;
+        InputFile inputFile = item.TelegramFileId is { } fileId
+            ? InputFile.FromFileId(fileId)
+            : InputFile.FromStream(stream!, Path.GetFileName(item.FilePath)); // non-null: opened above whenever there's no file id
 
         switch (item.Kind)
         {
@@ -316,7 +327,8 @@ public sealed class TelegramBotMessenger(
     /// </summary>
     private void DeleteUnlessRetained(MediaPayload payload, string filePath)
     {
-        if (payload.RetainFiles)
+        // An item sent by Telegram file id has no local file at all.
+        if (payload.RetainFiles || filePath.Length == 0)
         {
             return;
         }

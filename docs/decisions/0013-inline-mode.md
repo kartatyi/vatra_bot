@@ -14,7 +14,7 @@ The bot only helps where it is a member. To send a friend a TikTok in a private 
 
 ### Upload to a private storage channel, remember the file id
 
-A channel only the bot posts to, configured as `Inline:StorageChatId` (deployment identity — user-secrets, never committed). Preparing a link means: fetch it the way a group repost does (media cache, then the extractor chain), upload its first item to the channel, and store `(link key → kind, file_id, text)` in a `PreparedPosts` table keyed like the media cache. Every later query for that link — from anyone, in any chat — is answered from the table without touching the platform or re-uploading. Entries live 30 days, so an edited post isn't served stale for ever.
+A channel only the bot posts to, configured as `Storage:ChatId` (deployment identity — renamed from `Inline:StorageChatId` when the channel became the media store too, [ADR 0015](0015-telegram-media-store.md) — user-secrets, never committed). Preparing a link means: fetch it the way a group repost does (media cache, then the extractor chain), upload its first item to the channel, and store `(link key → kind, file_id, text)` in a `PreparedPosts` table keyed like the media cache. Every later query for that link — from anyone, in any chat — is answered from the table without touching the platform or re-uploading. Entries live 30 days, so an edited post isn't served stale for ever.
 
 Only the first item goes up: Telegram has no inline albums. A multi-photo post offers its first photo with the text.
 

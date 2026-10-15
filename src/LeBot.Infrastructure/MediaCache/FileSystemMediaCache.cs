@@ -123,13 +123,13 @@ public sealed class FileSystemMediaCache : IMediaCache
         }
     }
 
-    public async Task SaveAsync(MediaPayload payload, string extractor, CancellationToken cancellationToken)
+    public async Task<MediaPayload> SaveAsync(MediaPayload payload, string extractor, CancellationToken cancellationToken)
     {
         if (!_options.Enabled || payload.RetainFiles)
         {
             // RetainFiles means these files came out of the cache in the first place — re-saving
             // them would be a copy onto themselves and would reset a lifetime that must not slide.
-            return;
+            return payload;
         }
 
         var key = MediaCacheKey.For(payload.SourceUrl);
@@ -183,6 +183,9 @@ public sealed class FileSystemMediaCache : IMediaCache
             _logger.LogWarning(ex, "Could not cache the repost for {Url}", payload.SourceUrl);
             DeleteEntry(entryDirectory);
         }
+
+        // The disk store keeps copies, so the caller still sends — and then deletes — its own files.
+        return payload;
     }
 
     /// <summary>
