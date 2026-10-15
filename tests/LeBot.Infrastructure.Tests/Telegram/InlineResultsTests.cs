@@ -16,7 +16,7 @@ public class InlineResultsTests
 
         var articles = results.Should().AllBeOfType<InlineQueryResultArticle>().Subject.ToList();
         articles.Select(a => a.Title).Should().Equal("📹 Video", "📹 Video + text");
-        articles.Select(a => a.Description).Should().Equal(InlineResults.WithoutTextDescription, "the post");
+        articles.Select(a => a.Description).Should().Equal(InlineResults.WithoutTextDescription(BotLanguage.En), "the post");
         cache.Should().Be(0);
     }
 
@@ -36,7 +36,7 @@ public class InlineResultsTests
         // Titled placeholders, not photo results — clients show photo results without titles.
         var articles = results.Should().AllBeOfType<InlineQueryResultArticle>().Subject.ToList();
         articles.Select(a => a.Title).Should().Equal("🖼 Photo", "🖼 Photo + text");
-        articles[0].Description.Should().Be(InlineResults.WithoutTextDescription);
+        articles[0].Description.Should().Be(InlineResults.WithoutTextDescription(BotLanguage.En));
         InlineResults.TryParsePending(articles[0].Id, out var bareWithText).Should().BeTrue();
         InlineResults.TryParsePending(articles[1].Id, out var textWithText).Should().BeTrue();
         (bareWithText, textWithText).Should().Be((false, true));
@@ -60,7 +60,7 @@ public class InlineResultsTests
         var (results, cache) = InlineResults.For(new InlineAnswer.Failed(Url));
 
         var article = results.Should().ContainSingle().Which.Should().BeOfType<InlineQueryResultArticle>().Subject;
-        article.Title.Should().Be(InlineResults.FailedTitle);
+        article.Title.Should().Be(InlineResults.FailedTitle(BotLanguage.En));
         article.InputMessageContent.Should().BeOfType<InputTextMessageContent>().Which.MessageText.Should().Be(Url.AbsoluteUri);
         cache.Should().Be(0);
     }
@@ -71,11 +71,11 @@ public class InlineResultsTests
         var (results, cache) = InlineResults.For(new InlineAnswer.NotReady(Url));
 
         var articles = results.Should().AllBeOfType<InlineQueryResultArticle>().Subject.ToList();
-        articles.Select(a => a.Title).Should().Equal(InlineResults.PendingTitle, InlineResults.PendingWithTextTitle);
+        articles.Select(a => a.Title).Should().Equal(InlineResults.PendingTitle(BotLanguage.En), InlineResults.PendingWithTextTitle(BotLanguage.En));
         articles.Should().AllSatisfy(a =>
         {
             a.InputMessageContent.Should().BeOfType<InputTextMessageContent>()
-                .Which.MessageText.Should().Be($"{InlineResults.LoadingText}\n{Url.AbsoluteUri}");
+                .Which.MessageText.Should().Be($"{InlineResults.LoadingText(BotLanguage.En)}\n{Url.AbsoluteUri}");
             // Without a keyboard Telegram never reports the inline message id, and the placeholder can't be edited.
             a.ReplyMarkup!.InlineKeyboard.Single().Single().Url.Should().Be(Url.AbsoluteUri);
         });

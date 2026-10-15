@@ -136,7 +136,7 @@ public sealed class TelegramUpdateDispatcher(
         if (update.ChosenInlineResult is { InlineMessageId: { } inlineMessageId } chosen &&
             InlineResults.TryParsePending(chosen.ResultId, out var withText))
         {
-            _ = CompletePlaceholderAsync(update.Id, new ChosenPlaceholder(inlineMessageId, chosen.Query, withText), cancellationToken);
+            _ = CompletePlaceholderAsync(update.Id, new ChosenPlaceholder(inlineMessageId, chosen.Query, withText, chosen.From.LanguageCode), cancellationToken);
             return;
         }
 
@@ -187,7 +187,7 @@ public sealed class TelegramUpdateDispatcher(
         try
         {
             await inlineHandler.HandleAsync(
-                new Application.UseCases.AnswerInlineQuery.InlineQuery(inlineQuery.Id, inlineQuery.Query),
+                new Application.UseCases.AnswerInlineQuery.InlineQuery(inlineQuery.Id, inlineQuery.Query, inlineQuery.From.LanguageCode),
                 cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -229,6 +229,7 @@ public sealed class TelegramUpdateDispatcher(
         }
 
         var argument = parts.Length > 1 ? parts[1] : null;
+        var lang = BotLanguages.From(message.From?.LanguageCode);
 
         switch (command.ToLowerInvariant())
         {
@@ -240,26 +241,26 @@ public sealed class TelegramUpdateDispatcher(
                 await ReplyAsync(message, await BuildHelpAsync(message.From?.LanguageCode, cancellationToken), cancellationToken);
                 return true;
             case "stats":
-                await ReplyAsync(message, await BuildStatsAsync(cancellationToken), cancellationToken);
+                await ReplyAsync(message, await BuildStatsAsync(lang, cancellationToken), cancellationToken);
                 return true;
             case "failures":
-                await ReplyAsync(message, await BuildFailuresAsync(message.Chat.Id, argument, cancellationToken), cancellationToken);
+                await ReplyAsync(message, await BuildFailuresAsync(message.Chat.Id, argument, lang, cancellationToken), cancellationToken);
                 return true;
             case "top":
-                await ReplyAsync(message, await BuildTopAsync(cancellationToken), cancellationToken);
+                await ReplyAsync(message, await BuildTopAsync(lang, cancellationToken), cancellationToken);
                 return true;
             case "leaders":
-                await ReplyAsync(message, await BuildLeadersAsync(message, argument, cancellationToken), cancellationToken);
+                await ReplyAsync(message, await BuildLeadersAsync(message, argument, lang, cancellationToken), cancellationToken);
                 return true;
             case "me":
-                await ReplyAsync(message, await BuildMeAsync(message, argument, cancellationToken), cancellationToken);
+                await ReplyAsync(message, await BuildMeAsync(message, argument, lang, cancellationToken), cancellationToken);
                 return true;
             case "feedback":
                 await ReplyAsync(message, await feedback.RelayAsync(message, argument, cancellationToken), cancellationToken);
                 return true;
             case "settings":
                 var settings = await settingsStore.GetAsync(message.Chat.Id, cancellationToken);
-                await ReplyAsync(message, ChatSettingsKeyboard.Text, cancellationToken, ChatSettingsKeyboard.Markup(settings));
+                await ReplyAsync(message, ChatSettingsKeyboard.Text(lang), cancellationToken, ChatSettingsKeyboard.Markup(settings, lang));
                 return true;
             default:
                 return false;
@@ -307,7 +308,7 @@ public sealed class TelegramUpdateDispatcher(
         if (!await IsChatAdminAsync(origin.Chat, callback.From.Id, cancellationToken))
         {
             await bot.AnswerCallbackQuery(
-                callback.Id, ChatSettingsKeyboard.AdminsOnly, showAlert: true, cancellationToken: cancellationToken);
+                callback.Id, ChatSettingsKeyboard.AdminsOnly(BotLanguages.From(callback.From.LanguageCode)), showAlert: true, cancellationToken: cancellationToken);
             return;
         }
 
@@ -315,13 +316,13 @@ public sealed class TelegramUpdateDispatcher(
         {
             await settingsStore.SaveAsync(origin.Chat.Id, updated, cancellationToken);
             await bot.EditMessageReplyMarkup(
-                origin.Chat.Id, origin.MessageId, ChatSettingsKeyboard.Markup(updated), cancellationToken: cancellationToken);
+                origin.Chat.Id, origin.MessageId, ChatSettingsKeyboard.Markup(updated, BotLanguages.From(callback.From.LanguageCode)), cancellationToken: cancellationToken);
             logger.LogInformation(
                 "Chat {ChatId} settings changed: video {VideoCaption}, post {PostCaption}",
                 origin.Chat.Id, updated.VideoCaption, updated.PostCaption);
         }
 
-        await bot.AnswerCallbackQuery(callback.Id, ChatSettingsKeyboard.Saved, cancellationToken: cancellationToken);
+        await bot.AnswerCallbackQuery(callback.Id, ChatSettingsKeyboard.Saved(BotLanguages.From(callback.From.LanguageCode)), cancellationToken: cancellationToken);
     }
 
     /// <summary>
@@ -333,7 +334,7 @@ public sealed class TelegramUpdateDispatcher(
         var text = await revealableTexts.TakeAsync(origin.Chat.Id, origin.MessageId, cancellationToken);
         if (text is null)
         {
-            await bot.AnswerCallbackQuery(callback.Id, RevealButton.Gone, cancellationToken: cancellationToken);
+            await bot.AnswerCallbackQuery(callback.Id, RevealButton.Gone(BotLanguages.From(callback.From.LanguageCode)), cancellationToken: cancellationToken);
             return;
         }
 
@@ -386,39 +387,39 @@ public sealed class TelegramUpdateDispatcher(
             commands = await bot.GetMyCommands(cancellationToken: cancellationToken);
         }
 
-        return HelpReportFormatter.Help(description, commands, appVersion.Current);
+        return HelpReportFormatter.Help(description, commands, appVersion.Current, BotLanguages.From(languageCode));
     }
 
-    private async Task<string> BuildStatsAsync(CancellationToken cancellationToken)
+    private async Task<string> BuildStatsAsync(BotLanguage lang, CancellationToken cancellationToken)
     {
         var uptime = timeProvider.GetUtcNow() - metrics.StartedAt;
         var allTime = await eventStore.GetStatsAsync(DateTimeOffset.MinValue, cancellationToken);
-        return DashboardReportFormatter.Stats(metrics, uptime, allTime);
+        return DashboardReportFormatter.Stats(metrics, uptime, allTime, lang);
     }
 
-    private async Task<string> BuildFailuresAsync(long chatId, string? argument, CancellationToken cancellationToken)
+    private async Task<string> BuildFailuresAsync(long chatId, string? argument, BotLanguage lang, CancellationToken cancellationToken)
     {
         var limit = ParseListSize(argument);
 
         // Scoped to the asking chat: a failure row carries the full URL someone posted, and one group
         // has no business reading another's.
         var failures = await eventStore.GetRecentFailuresAsync(limit, ChatHasher.Of(chatId), cancellationToken);
-        return DashboardReportFormatter.Failures(failures, timeProvider.GetUtcNow());
+        return DashboardReportFormatter.Failures(failures, timeProvider.GetUtcNow(), lang);
     }
 
-    private async Task<string> BuildLeadersAsync(Message message, string? argument, CancellationToken cancellationToken)
+    private async Task<string> BuildLeadersAsync(Message message, string? argument, BotLanguage lang, CancellationToken cancellationToken)
     {
         var option = argument?.Trim().ToLowerInvariant();
         if (option is "optout" or "optin")
         {
             if (message.From is not { IsBot: false } sender)
             {
-                return LeaderboardFormatter.NoSender;
+                return LeaderboardFormatter.NoSender(lang);
             }
 
             var optingOut = option == "optout";
             await optOuts.SetOptedOutAsync(message.Chat.Id, sender.Id, optingOut, cancellationToken);
-            return optingOut ? LeaderboardFormatter.OptedOut : LeaderboardFormatter.OptedIn;
+            return optingOut ? LeaderboardFormatter.OptedOut(lang) : LeaderboardFormatter.OptedIn(lang);
         }
 
         var allTime = option == "all";
@@ -440,25 +441,25 @@ public sealed class TelegramUpdateDispatcher(
             }
         }
 
-        return LeaderboardFormatter.Format(ranking, allTime);
+        return LeaderboardFormatter.Format(ranking, allTime, lang);
     }
 
-    private async Task<string> BuildMeAsync(Message message, string? argument, CancellationToken cancellationToken)
+    private async Task<string> BuildMeAsync(Message message, string? argument, BotLanguage lang, CancellationToken cancellationToken)
     {
         if (message.From is not { IsBot: false } sender)
         {
-            return LeaderboardFormatter.NoSender;
+            return LeaderboardFormatter.NoSender(lang);
         }
 
         if (await optOuts.IsOptedOutAsync(message.Chat.Id, sender.Id, cancellationToken))
         {
-            return LeaderboardFormatter.MeOptedOut;
+            return LeaderboardFormatter.MeOptedOut(lang);
         }
 
         var allTime = argument?.Trim().ToLowerInvariant() == "all";
         var stats = await personStats.GetPersonalAsync(message.Chat.Id, sender.Id, WindowStart(allTime), cancellationToken);
         var name = string.IsNullOrWhiteSpace(sender.LastName) ? sender.FirstName : $"{sender.FirstName} {sender.LastName}";
-        return LeaderboardFormatter.FormatMe(name, stats, allTime);
+        return LeaderboardFormatter.FormatMe(name, stats, allTime, lang);
     }
 
     private DateTimeOffset WindowStart(bool allTime) =>
@@ -487,12 +488,12 @@ public sealed class TelegramUpdateDispatcher(
         }
     }
 
-    private async Task<string> BuildTopAsync(CancellationToken cancellationToken)
+    private async Task<string> BuildTopAsync(BotLanguage lang, CancellationToken cancellationToken)
     {
         var byVolume = await eventStore.GetTopHostsByVolumeAsync(DefaultListSize, DateTimeOffset.MinValue, cancellationToken);
         var byFailureRate = await eventStore.GetTopHostsByFailureRateAsync(
             DefaultListSize, FailureRateMinVolume, DateTimeOffset.MinValue, cancellationToken);
-        return DashboardReportFormatter.Top(byVolume, byFailureRate, FailureRateMinVolume);
+        return DashboardReportFormatter.Top(byVolume, byFailureRate, FailureRateMinVolume, lang);
     }
 
     /// <summary>Reads an optional "/failures N" count, defaulting and clamping it to a safe range.</summary>

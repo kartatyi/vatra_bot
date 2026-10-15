@@ -17,7 +17,7 @@ public class ChatSettingsKeyboardTests
     [Fact]
     public void Markup_TicksTheActiveChoiceOfEachRow()
     {
-        var markup = ChatSettingsKeyboard.Markup(new ChatSettings(CaptionMode.Brief, CaptionMode.Full));
+        var markup = ChatSettingsKeyboard.Markup(new ChatSettings(CaptionMode.Brief, CaptionMode.Full), BotLanguage.En);
 
         var labels = markup.InlineKeyboard.Select(row => row.Select(b => b.Text).ToArray()).ToArray();
         labels.Should().BeEquivalentTo(TickedForBriefFullOn, options => options.WithStrictOrdering());
@@ -26,7 +26,7 @@ public class ChatSettingsKeyboardTests
     [Fact]
     public void Markup_EveryButtonRoundTripsThroughTryApply()
     {
-        var markup = ChatSettingsKeyboard.Markup(ChatSettings.Default);
+        var markup = ChatSettingsKeyboard.Markup(ChatSettings.Default, BotLanguage.En);
 
         foreach (var button in markup.InlineKeyboard.SelectMany(row => row))
         {

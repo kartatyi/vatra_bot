@@ -9,7 +9,8 @@ namespace LeBot.Infrastructure.Telegram;
 /// Renders the dashboard commands' Telegram replies as plain text — pure string building, kept out of the
 /// dispatcher so it can be unit-tested without a bot client. Plain text (no Markdown/HTML parse mode) on
 /// purpose: URLs carry <c>_</c>, <c>*</c>, <c>~</c> that would otherwise need escaping. Every message is
-/// capped at Telegram's <see cref="TelegramMaxMessageLength"/> limit.
+/// capped at Telegram's <see cref="TelegramMaxMessageLength"/> limit. Extractor names and error variants
+/// stay as they are in either language — they're identifiers, not prose.
 /// </summary>
 internal static class DashboardReportFormatter
 {
@@ -21,17 +22,17 @@ internal static class DashboardReportFormatter
     /// <summary>
     /// <c>/stats</c>: the in-memory "since boot" counters merged with the durable all-time rollup.
     /// </summary>
-    public static string Stats(RepostMetrics metrics, TimeSpan uptime, RepostStatsSnapshot allTime)
+    public static string Stats(RepostMetrics metrics, TimeSpan uptime, RepostStatsSnapshot allTime, BotLanguage lang = BotLanguage.En)
     {
         var sb = new StringBuilder();
-        sb.Append("📊 Stats\n\n");
-        sb.Append("Uptime: ").Append(FormatUptime(uptime)).Append('\n');
+        sb.Append(lang.Pick("📊 Статистика\n\n", "📊 Stats\n\n"));
+        sb.Append(lang.Pick("Працює: ", "Uptime: ")).Append(FormatUptime(uptime, lang)).Append('\n');
 
-        sb.Append("Since boot — media ").Append(Num(metrics.MediaReposts))
-            .Append(", text ").Append(Num(metrics.TextReposts))
-            .Append(", cached ").Append(Num(metrics.CacheHits))
-            .Append(", failures ").Append(Num(metrics.Failures))
-            .Append(", skipped ").Append(Num(metrics.SilentSkips)).Append('\n');
+        sb.Append(lang.Pick("Від запуску — медіа ", "Since boot — media ")).Append(Num(metrics.MediaReposts))
+            .Append(lang.Pick(", текст ", ", text ")).Append(Num(metrics.TextReposts))
+            .Append(lang.Pick(", з кешу ", ", cached ")).Append(Num(metrics.CacheHits))
+            .Append(lang.Pick(", збоїв ", ", failures ")).Append(Num(metrics.Failures))
+            .Append(lang.Pick(", пропущено ", ", skipped ")).Append(Num(metrics.SilentSkips)).Append('\n');
 
         foreach (var pair in metrics.ByExtractor.OrderByDescending(kv => kv.Value))
         {
@@ -41,21 +42,21 @@ internal static class DashboardReportFormatter
         sb.Append('\n');
         if (allTime.TotalProcessed == 0)
         {
-            sb.Append("All-time: no history recorded yet");
+            sb.Append(lang.Pick("За весь час: історії ще немає", "All-time: no history recorded yet"));
             return Cap(sb.ToString());
         }
 
         var since = allTime.FirstEventAt is { } first
             ? first.UtcDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
             : "?";
-        sb.Append("All-time (since ").Append(since).Append("): ")
-            .Append(Num(allTime.TotalProcessed)).Append(" processed\n");
-        sb.Append("✓ ").Append(Percent(allTime.SuccessRate)).Append(" success — media ")
-            .Append(Num(allTime.MediaReposts)).Append(", text ").Append(Num(allTime.TextFallbacks)).Append('\n');
-        sb.Append("✗ failures ").Append(Num(allTime.Failures))
-            .Append(", nothing ").Append(Num(allTime.NothingExtracted))
-            .Append(", no-extractor ").Append(Num(allTime.NoExtractor)).Append('\n');
-        sb.Append("Chats seen: ").Append(Num(allTime.DistinctChats));
+        sb.Append(lang.Pick("За весь час (від ", "All-time (since ")).Append(since).Append("): ")
+            .Append(Num(allTime.TotalProcessed)).Append(lang.Pick(" оброблено\n", " processed\n"));
+        sb.Append("✓ ").Append(Percent(allTime.SuccessRate)).Append(lang.Pick(" успішно — медіа ", " success — media "))
+            .Append(Num(allTime.MediaReposts)).Append(lang.Pick(", текст ", ", text ")).Append(Num(allTime.TextFallbacks)).Append('\n');
+        sb.Append(lang.Pick("✗ збоїв ", "✗ failures ")).Append(Num(allTime.Failures))
+            .Append(lang.Pick(", нічого ", ", nothing ")).Append(Num(allTime.NothingExtracted))
+            .Append(lang.Pick(", без екстрактора ", ", no-extractor ")).Append(Num(allTime.NoExtractor)).Append('\n');
+        sb.Append(lang.Pick("Чатів: ", "Chats seen: ")).Append(Num(allTime.DistinctChats));
 
         return Cap(sb.ToString());
     }
@@ -63,18 +64,19 @@ internal static class DashboardReportFormatter
     /// <summary>
     /// <c>/failures</c>: the asking chat's most recent broken links, each with the error the extractor reported.
     /// </summary>
-    public static string Failures(IReadOnlyList<RecentFailure> failures, DateTimeOffset now)
+    public static string Failures(IReadOnlyList<RecentFailure> failures, DateTimeOffset now, BotLanguage lang = BotLanguage.En)
     {
         if (failures.Count == 0)
         {
-            return "No failures in this chat 🎉";
+            return lang.Pick("У цьому чаті збоїв немає 🎉", "No failures in this chat 🎉");
         }
 
         var sb = new StringBuilder();
-        sb.Append("🚫 Last ").Append(Num(failures.Count)).Append(" failure(s) in this chat\n");
+        sb.Append(lang.Pick("🚫 Останні збої в цьому чаті: ", "🚫 Last ")).Append(Num(failures.Count))
+            .Append(lang.Pick("\n", " failure(s) in this chat\n"));
         foreach (var failure in failures)
         {
-            sb.Append('\n').Append(Age(failure.OccurredAt, now)).Append(" · ").Append(failure.Host).Append('\n');
+            sb.Append('\n').Append(Age(failure.OccurredAt, now, lang)).Append(" · ").Append(failure.Host).Append('\n');
             sb.Append(failure.Url).Append('\n');
             var variant = failure.ErrorVariant ?? "Error";
             sb.Append(variant);
@@ -92,15 +94,15 @@ internal static class DashboardReportFormatter
     /// <summary>
     /// <c>/top</c>: the busiest platforms and the ones breaking most often.
     /// </summary>
-    public static string Top(IReadOnlyList<HostStat> byVolume, IReadOnlyList<HostStat> byFailureRate, int failureRateMinVolume)
+    public static string Top(IReadOnlyList<HostStat> byVolume, IReadOnlyList<HostStat> byFailureRate, int failureRateMinVolume, BotLanguage lang = BotLanguage.En)
     {
         if (byVolume.Count == 0)
         {
-            return "No platform data yet.";
+            return lang.Pick("Даних про платформи ще немає.", "No platform data yet.");
         }
 
         var sb = new StringBuilder();
-        sb.Append("🏆 Top platforms\n\nBy volume:\n");
+        sb.Append(lang.Pick("📈 Топ платформ\n\nЗа кількістю:\n", "📈 Top platforms\n\nBy volume:\n"));
         var rank = 1;
         foreach (var host in byVolume)
         {
@@ -108,10 +110,11 @@ internal static class DashboardReportFormatter
                 .Append(" — ").Append(Num(host.Total)).Append('\n');
         }
 
-        sb.Append("\nBy failure rate (≥").Append(failureRateMinVolume).Append(" posts):\n");
+        sb.Append(lang.Pick("\nЗа часткою збоїв (від ", "\nBy failure rate (≥")).Append(failureRateMinVolume)
+            .Append(lang.Pick(" постів):\n", " posts):\n"));
         if (byFailureRate.Count == 0)
         {
-            sb.Append("  (none yet)");
+            sb.Append(lang.Pick("  (поки немає)", "  (none yet)"));
         }
         else
         {
@@ -127,30 +130,30 @@ internal static class DashboardReportFormatter
         return Cap(sb.ToString());
     }
 
-    private static string Age(DateTimeOffset when, DateTimeOffset now)
+    private static string Age(DateTimeOffset when, DateTimeOffset now, BotLanguage lang)
     {
         var elapsed = now - when;
         if (elapsed < TimeSpan.FromMinutes(1))
         {
-            return "just now";
+            return lang.Pick("щойно", "just now");
         }
 
         if (elapsed < TimeSpan.FromHours(1))
         {
-            return $"{(int)elapsed.TotalMinutes}m ago";
+            return lang.Pick($"{(int)elapsed.TotalMinutes} хв тому", $"{(int)elapsed.TotalMinutes}m ago");
         }
 
         if (elapsed < TimeSpan.FromDays(1))
         {
-            return $"{(int)elapsed.TotalHours}h ago";
+            return lang.Pick($"{(int)elapsed.TotalHours} год тому", $"{(int)elapsed.TotalHours}h ago");
         }
 
-        return $"{(int)elapsed.TotalDays}d ago";
+        return lang.Pick($"{(int)elapsed.TotalDays} дн тому", $"{(int)elapsed.TotalDays}d ago");
     }
 
-    private static string FormatUptime(TimeSpan uptime) =>
+    private static string FormatUptime(TimeSpan uptime, BotLanguage lang) =>
         uptime.TotalDays >= 1
-            ? $"{(int)uptime.TotalDays}d {uptime:hh\\:mm}"
+            ? $"{(int)uptime.TotalDays}{lang.Pick(" дн ", "d ")}{uptime:hh\\:mm}"
             : uptime.ToString("hh\\:mm\\:ss", CultureInfo.InvariantCulture);
 
     private static string Num(long value) => value.ToString("N0", CultureInfo.InvariantCulture);

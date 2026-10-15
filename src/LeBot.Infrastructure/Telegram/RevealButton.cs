@@ -6,6 +6,8 @@ namespace LeBot.Infrastructure.Telegram;
 /// <summary>
 /// The "show text" button under a repost whose caption the chat's settings dropped or cut. Pressing it
 /// swaps the full text into that same message — the chat gets no extra message, and the button goes away.
+/// The label is shared by the whole chat, so it uses the default language; the reply to a press is the
+/// presser's.
 /// </summary>
 internal static class RevealButton
 {
@@ -14,7 +16,7 @@ internal static class RevealButton
 
     public const string Label = "📝 Text";
 
-    public const string Gone = "This text is no longer available.";
+    public static string Gone(BotLanguage lang) => lang.Pick("Цей текст уже недоступний.", "This text is no longer available.");
 
     /// <summary>The button for <paramref name="payload"/>, or <see langword="null"/> when it has nothing held back.</summary>
     public static InlineKeyboardMarkup? For(MediaPayload payload) =>

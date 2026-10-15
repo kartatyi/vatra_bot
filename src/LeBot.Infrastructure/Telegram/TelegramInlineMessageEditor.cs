@@ -39,14 +39,14 @@ internal sealed class TelegramInlineMessageEditor(
         }
     }
 
-    public async Task ShowFailureAsync(string inlineMessageId, Uri url, CancellationToken cancellationToken)
+    public async Task ShowFailureAsync(string inlineMessageId, Uri url, string? languageCode, CancellationToken cancellationToken)
     {
         try
         {
             await bot.EditMessageText(
                 inlineMessageId,
-                $"{InlineResults.FailedTitle}\n{url.AbsoluteUri}",
-                replyMarkup: InlineResults.OriginalLink(url),
+                $"{InlineResults.FailedTitle(BotLanguages.From(languageCode))}\n{url.AbsoluteUri}",
+                replyMarkup: InlineResults.OriginalLink(url, BotLanguages.From(languageCode)),
                 cancellationToken: cancellationToken);
         }
         catch (RequestException ex)

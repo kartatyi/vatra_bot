@@ -35,7 +35,7 @@ public class InlineTests
 
         await CreateHandler().HandleAsync(new InlineQuery("q", "hello"), CancellationToken.None);
 
-        await _answerer.Received(1).AnswerAsync("q", new InlineAnswer.NoLink(), Arg.Any<CancellationToken>());
+        await _answerer.Received(1).AnswerAsync("q", new InlineAnswer.NoLink(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -46,7 +46,7 @@ public class InlineTests
 
         await CreateHandler().HandleAsync(new InlineQuery("q", Url.AbsoluteUri), CancellationToken.None);
 
-        await _answerer.Received(1).AnswerAsync("q", new InlineAnswer.Ready(post, Url), Arg.Any<CancellationToken>());
+        await _answerer.Received(1).AnswerAsync("q", new InlineAnswer.Ready(post, Url), Arg.Any<string?>(), Arg.Any<CancellationToken>());
         await _extractor.DidNotReceiveWithAnyArgs().ExtractAsync(default!, default);
     }
 
@@ -58,7 +58,7 @@ public class InlineTests
 
         await CreateHandler().HandleAsync(new InlineQuery("q", Url.AbsoluteUri), CancellationToken.None);
 
-        await _answerer.Received(1).AnswerAsync("q", new InlineAnswer.Failed(Url), Arg.Any<CancellationToken>());
+        await _answerer.Received(1).AnswerAsync("q", new InlineAnswer.Failed(Url), Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -70,7 +70,7 @@ public class InlineTests
         _time.Advance(AnswerInlineQueryHandler.WaitBudget + TimeSpan.FromSeconds(1));
         await handling;
 
-        await _answerer.Received(1).AnswerAsync("q", new InlineAnswer.NotReady(Url), Arg.Any<CancellationToken>());
+        await _answerer.Received(1).AnswerAsync("q", new InlineAnswer.NotReady(Url), Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -177,7 +177,7 @@ public class InlineTests
 
         await CreatePlaceholderHandler().HandleAsync(new ChosenPlaceholder("im-1", Url.AbsoluteUri, false), CancellationToken.None);
 
-        await _editor.Received(1).ShowFailureAsync("im-1", Url, Arg.Any<CancellationToken>());
+        await _editor.Received(1).ShowFailureAsync("im-1", Url, Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
