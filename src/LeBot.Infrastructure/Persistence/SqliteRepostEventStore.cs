@@ -68,14 +68,39 @@ internal sealed class SqliteRepostEventStore(
             LastEventAt: lastAt);
     }
 
-    public async Task<IReadOnlyList<RecentFailure>> GetRecentFailuresAsync(int limit, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<RecentFailure>> GetRecentFailuresAsync(int limit, string? chatHash, CancellationToken cancellationToken)
     {
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-        return await db.RepostEvents.AsNoTracking()
-            .Where(e => e.Outcome == RepostOutcome.Failure)
+        var failures = db.RepostEvents.AsNoTracking().Where(e => e.Outcome == RepostOutcome.Failure);
+        if (chatHash is not null)
+        {
+            failures = failures.Where(e => e.ChatHash == chatHash);
+        }
+
+        return await failures
             .OrderByDescending(e => e.OccurredAt)
             .Take(limit)
             .Select(e => new RecentFailure(e.OccurredAt, e.Host, e.Url, e.ErrorVariant, e.ErrorReason, e.Extractor))
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<SenderHostCount>> GetSenderHostCountsAsync(
+        string chatHash,
+        DateTimeOffset since,
+        CancellationToken cancellationToken)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var optedOut = db.StatsOptOuts.Where(o => o.ChatHash == chatHash).Select(o => o.UserId);
+
+        return await db.RepostEvents.AsNoTracking()
+            .Where(e => e.ChatHash == chatHash
+                && e.OccurredAt >= since
+                && e.SenderId != null
+                && (e.Outcome == RepostOutcome.MediaRepost || e.Outcome == RepostOutcome.TextFallback)
+                && !optedOut.Contains(e.SenderId ?? 0))
+            // "?? 0" never fires — the filter above drops null senders — but keeps the key non-nullable.
+            .GroupBy(e => new { SenderId = e.SenderId ?? 0, e.Host })
+            .Select(g => new SenderHostCount(g.Key.SenderId, g.Key.Host, g.Count()))
             .ToListAsync(cancellationToken);
     }
 

@@ -10,8 +10,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace LeBot.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(LeBotDbContext))]
-    [Migration("20261015001209_AddSeenLinks")]
-    partial class AddSeenLinks
+    [Migration("20261014182407_AddChatSettings")]
+    partial class AddChatSettings
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -78,21 +78,52 @@ namespace LeBot.Infrastructure.Persistence.Migrations
                     b.ToTable("RepostEvents", (string)null);
                 });
 
-            modelBuilder.Entity("LeBot.Infrastructure.Persistence.SeenLinkRow", b =>
+            modelBuilder.Entity("LeBot.Infrastructure.Persistence.ChatSettingsRow", b =>
                 {
                     b.Property<string>("ChatHash")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("LinkKey")
-                        .HasColumnType("TEXT");
+                    b.Property<bool>("OfferFullText")
+                        .HasColumnType("INTEGER");
 
-                    b.Property<string>("FirstSeenAt")
+                    b.Property<string>("PostCaption")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.HasKey("ChatHash", "LinkKey");
+                    b.Property<string>("UpdatedAt")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
 
-                    b.ToTable("SeenLinks", (string)null);
+                    b.Property<string>("VideoCaption")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("ChatHash");
+
+                    b.ToTable("ChatSettings", (string)null);
+                });
+
+            modelBuilder.Entity("LeBot.Infrastructure.Persistence.RevealableTextRow", b =>
+                {
+                    b.Property<string>("ChatHash")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("MessageId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CreatedAt")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("ChatHash", "MessageId");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.ToTable("RevealableTexts", (string)null);
                 });
 #pragma warning restore 612, 618
         }

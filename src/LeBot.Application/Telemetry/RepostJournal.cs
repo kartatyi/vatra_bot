@@ -14,20 +14,20 @@ public sealed class RepostJournal(
     IAppVersion appVersion,
     TimeProvider timeProvider) : IRepostJournal
 {
-    public Task RecordMediaRepostAsync(Uri url, string extractor, int mediaCount, long? mediaBytes, TimeSpan elapsed, long chatId, CancellationToken cancellationToken) =>
-        AppendAsync(url, RepostOutcome.MediaRepost, extractor, errorVariant: null, errorReason: null, mediaCount, mediaBytes, elapsed, chatId, cancellationToken);
+    public Task RecordMediaRepostAsync(Uri url, string extractor, int mediaCount, long? mediaBytes, TimeSpan elapsed, long chatId, long? senderId, CancellationToken cancellationToken) =>
+        AppendAsync(url, RepostOutcome.MediaRepost, extractor, errorVariant: null, errorReason: null, mediaCount, mediaBytes, elapsed, chatId, senderId, cancellationToken);
 
-    public Task RecordTextFallbackAsync(Uri url, string? extractor, TimeSpan elapsed, long chatId, CancellationToken cancellationToken) =>
-        AppendAsync(url, RepostOutcome.TextFallback, extractor, errorVariant: null, errorReason: null, mediaCount: 0, mediaBytes: null, elapsed, chatId, cancellationToken);
+    public Task RecordTextFallbackAsync(Uri url, string? extractor, TimeSpan elapsed, long chatId, long? senderId, CancellationToken cancellationToken) =>
+        AppendAsync(url, RepostOutcome.TextFallback, extractor, errorVariant: null, errorReason: null, mediaCount: 0, mediaBytes: null, elapsed, chatId, senderId, cancellationToken);
 
     public Task RecordFailureAsync(Uri url, string extractor, ExtractionError extractionError, TimeSpan elapsed, long chatId, CancellationToken cancellationToken) =>
-        AppendAsync(url, RepostOutcome.Failure, extractor, errorVariant: extractionError.GetType().Name, errorReason: extractionError.Reason, mediaCount: 0, mediaBytes: null, elapsed, chatId, cancellationToken);
+        AppendAsync(url, RepostOutcome.Failure, extractor, errorVariant: extractionError.GetType().Name, errorReason: extractionError.Reason, mediaCount: 0, mediaBytes: null, elapsed, chatId, senderId: null, cancellationToken);
 
     public Task RecordNothingExtractedAsync(Uri url, string extractor, TimeSpan elapsed, long chatId, CancellationToken cancellationToken) =>
-        AppendAsync(url, RepostOutcome.NothingExtracted, extractor, errorVariant: null, errorReason: null, mediaCount: 0, mediaBytes: null, elapsed, chatId, cancellationToken);
+        AppendAsync(url, RepostOutcome.NothingExtracted, extractor, errorVariant: null, errorReason: null, mediaCount: 0, mediaBytes: null, elapsed, chatId, senderId: null, cancellationToken);
 
     public Task RecordNoExtractorAsync(Uri url, TimeSpan elapsed, long chatId, CancellationToken cancellationToken) =>
-        AppendAsync(url, RepostOutcome.NoExtractor, extractor: null, errorVariant: null, errorReason: null, mediaCount: 0, mediaBytes: null, elapsed, chatId, cancellationToken);
+        AppendAsync(url, RepostOutcome.NoExtractor, extractor: null, errorVariant: null, errorReason: null, mediaCount: 0, mediaBytes: null, elapsed, chatId, senderId: null, cancellationToken);
 
     private Task AppendAsync(
         Uri url,
@@ -39,6 +39,7 @@ public sealed class RepostJournal(
         long? mediaBytes,
         TimeSpan elapsed,
         long chatId,
+        long? senderId,
         CancellationToken cancellationToken)
     {
         var repostEvent = new RepostEvent(
@@ -53,7 +54,8 @@ public sealed class RepostJournal(
             MediaBytes: mediaBytes,
             ElapsedMs: (long)elapsed.TotalMilliseconds,
             BotVersion: appVersion.Current.ToString(),
-            ChatHash: ChatHasher.Of(chatId));
+            ChatHash: ChatHasher.Of(chatId),
+            SenderId: senderId);
 
         return store.AppendAsync(repostEvent, cancellationToken);
     }

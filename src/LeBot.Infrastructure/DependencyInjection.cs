@@ -60,6 +60,9 @@ public static class DependencyInjection
         });
         services.AddSingleton<IRepostEventStore, SqliteRepostEventStore>();
         services.AddSingleton<ISeenLinkStore, SqliteSeenLinkStore>();
+        services.AddSingleton<IStatsOptOutStore, SqliteStatsOptOutStore>();
+        services.AddSingleton<IChatSettingsStore, SqliteChatSettingsStore>();
+        services.AddSingleton<IRevealableTextStore, SqliteRevealableTextStore>();
 
         services.AddSingleton<ITelegramBotClient>(sp =>
         {
