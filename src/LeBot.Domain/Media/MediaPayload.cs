@@ -25,4 +25,29 @@ public sealed record MediaPayload(
 {
     /// <summary>True when the payload contains at least one media item.</summary>
     public bool HasMedia => Items.Count > 0;
+
+    /// <summary>
+    /// The text a repost of this payload carries: the description — the post as its author wrote it — or,
+    /// failing that, the title, then an "— author" line. Null when there is none of the three. Untrimmed
+    /// for length; fitting it to a Telegram limit is the sender's job.
+    /// </summary>
+    public string? Body
+    {
+        get
+        {
+            // The title comes second because yt-dlp often synthesises it ("Video by <uploader>") for short-form.
+            var primary = !string.IsNullOrWhiteSpace(Description) ? Description.Trim()
+                : !string.IsNullOrWhiteSpace(Title) ? Title.Trim()
+                : null;
+            var author = !string.IsNullOrWhiteSpace(Author) ? Author.Trim() : null;
+
+            return (primary, author) switch
+            {
+                (string p, string a) => $"{p}\n\n— {a}",
+                (string p, null) => p,
+                (null, string a) => $"— {a}",
+                _ => null,
+            };
+        }
+    }
 }

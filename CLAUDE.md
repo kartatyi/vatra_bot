@@ -192,6 +192,15 @@ Cache knobs ([`MediaCacheOptions`](src/LeBot.Infrastructure/Configuration/MediaC
 }
 ```
 
+Inline knobs ([`InlineOptions`](src/LeBot.Infrastructure/Configuration/InlineOptions.cs), `Inline` section) — `@bot <link>` in any chat ([ADR 0013](docs/decisions/0013-inline-mode.md)); BotFather `/setinline` must be on too:
+
+```jsonc
+"Inline": {
+  "StorageChatId": null   // private channel the bot uploads to — deployment identity: user-secrets / env only;
+                          // unset, inline answers text posts only and every media post "couldn't get media"
+}
+```
+
 ## Docs
 
 | File | For | Holds |

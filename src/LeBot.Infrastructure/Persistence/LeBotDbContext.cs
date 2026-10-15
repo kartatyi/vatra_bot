@@ -14,6 +14,8 @@ public sealed class LeBotDbContext(DbContextOptions<LeBotDbContext> options) : D
 {
     public DbSet<RepostEvent> RepostEvents => Set<RepostEvent>();
 
+    internal DbSet<PreparedPostRow> PreparedPosts => Set<PreparedPostRow>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         var repostEvent = modelBuilder.Entity<RepostEvent>();
@@ -49,5 +51,15 @@ public sealed class LeBotDbContext(DbContextOptions<LeBotDbContext> options) : D
         repostEvent.HasIndex(e => e.OccurredAt);
         repostEvent.HasIndex(e => e.Host);
         repostEvent.HasIndex(e => e.Outcome);
+
+        var prepared = modelBuilder.Entity<PreparedPostRow>();
+        prepared.ToTable("PreparedPosts");
+        prepared.HasKey(p => p.LinkKey);
+        prepared.Property(p => p.Kind).HasConversion<string>();
+        prepared.Property(p => p.PreparedAt)
+            .HasConversion(
+                value => value.ToUniversalTime().ToString(occurredAtFormat, CultureInfo.InvariantCulture),
+                stored => DateTimeOffset.Parse(stored, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind))
+            .IsRequired();
     }
 }
