@@ -101,6 +101,40 @@ public class HandleIncomingMessageHandlerTests
         await _messenger.DidNotReceive().SetReactionAsync(123L, 7, null, Arg.Any<CancellationToken>());
     }
 
+    [Theory]
+    [InlineData(true, LinkReaction.Failed)]
+    [InlineData(false, null)]
+    public async Task HandleAsync_ExtractorTriedAndFailed_ShrugsOnlyWhereTheChatOptedIn(bool shrug, LinkReaction? expected)
+    {
+        var url = new Uri("https://example.com/x");
+        _settings.GetAsync(123L, Arg.Any<CancellationToken>())
+            .Returns(new ChatSettings(CaptionMode.Full, CaptionMode.Full, ShrugOnFailure: shrug));
+        _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
+        _extractor.CanHandle(url).Returns(true);
+        _extractor.ExtractAsync(url, Arg.Any<CancellationToken>())
+            .Returns(Result<MediaPayload, ExtractionError>.Failure(new ExtractionError.ContentUnavailable(url, "gone")));
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        await _messenger.Received(1).SetReactionAsync(123L, 7, expected, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleAsync_NoExtractorClaimsTheLink_NeverShrugs()
+    {
+        var url = new Uri("https://example.com/news");
+        _settings.GetAsync(123L, Arg.Any<CancellationToken>())
+            .Returns(new ChatSettings(CaptionMode.Full, CaptionMode.Full, ShrugOnFailure: true));
+        _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
+        _extractor.CanHandle(url).Returns(true);
+        _extractor.ExtractAsync(url, Arg.Any<CancellationToken>())
+            .Returns(Result<MediaPayload, ExtractionError>.Failure(new ExtractionError.UnsupportedPlatform(url)));
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        await _messenger.DidNotReceive().SetReactionAsync(123L, 7, LinkReaction.Failed, Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task HandleAsync_ExtractorThrows_StillClearsTheWorkingReaction()
     {

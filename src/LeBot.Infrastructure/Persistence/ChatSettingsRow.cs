@@ -16,5 +16,7 @@ internal sealed class ChatSettingsRow
 
     public bool OfferFullText { get; set; }
 
+    public bool ShrugOnFailure { get; set; }
+
     public DateTimeOffset UpdatedAt { get; set; }
 }

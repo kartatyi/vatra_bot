@@ -16,7 +16,15 @@ namespace LeBot.Domain.Settings;
 /// Whether a repost whose text was dropped or cut offers a button that shows the rest. On by default:
 /// the chat stays tidy, and the one post where the text matters is a tap away.
 /// </param>
-public sealed record ChatSettings(CaptionMode VideoCaption, CaptionMode PostCaption, bool OfferFullText = true)
+/// <param name="ShrugOnFailure">
+/// Whether a link the bot tried and failed to fetch gets a 🤷 reaction instead of silence. Off by default:
+/// silence is the bot's rule, and this is a chat's opt-in exception to it.
+/// </param>
+public sealed record ChatSettings(
+    CaptionMode VideoCaption,
+    CaptionMode PostCaption,
+    bool OfferFullText = true,
+    bool ShrugOnFailure = false)
 {
     /// <summary>What a chat gets before anyone has opened <c>/settings</c>.</summary>
     public static ChatSettings Default { get; } = new(CaptionMode.Off, CaptionMode.Full);

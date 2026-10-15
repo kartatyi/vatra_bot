@@ -61,6 +61,9 @@ public enum LinkReaction
 
     /// <summary>This chat has seen the link before.</summary>
     Repeat,
+
+    /// <summary>The bot tried the link and got nothing out of it — shown only where a chat opted in.</summary>
+    Failed,
 }
 
 /// <summary>

@@ -11,6 +11,8 @@ public class ChatSettingsTests
     public void Default_DropsVideoTextAndKeepsPostText()
     {
         ChatSettings.Default.Should().Be(new ChatSettings(CaptionMode.Off, CaptionMode.Full));
+        ChatSettings.Default.OfferFullText.Should().BeTrue();
+        ChatSettings.Default.ShrugOnFailure.Should().BeFalse();
     }
 
     [Theory]

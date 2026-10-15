@@ -131,6 +131,7 @@ public sealed class TelegramBotMessenger(
     {
         LinkReaction.Working => "👀",
         LinkReaction.Repeat => "🥱",
+        LinkReaction.Failed => "🤷",
         _ => throw new ArgumentOutOfRangeException(nameof(reaction), reaction, "Unknown reaction."),
     };
 

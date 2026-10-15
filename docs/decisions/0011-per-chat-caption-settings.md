@@ -42,6 +42,10 @@ A `ChatSettings` table in the same SQLite file as the repost journal, keyed by `
 
 `/settings` replies with an inline keyboard — one row per setting, the active choice ticked. A press is applied only when `getChatMember` says the presser is the chat's creator or an administrator; anyone in a private chat owns it. Every press is answered, since Telegram keeps the button spinning until it is. Callback data is parsed strictly: anything the keyboard didn't send — including a forged "text-led: off" — is ignored.
 
+### A chat may opt out of silence
+
+The bot's rule is to stay silent when a link yields nothing. A fourth `/settings` row lets a chat trade that for a 🤷 reaction on the link — off by default. It fires only when an extractor took the link on and failed, never for a link no extractor claimed: that is every news or GitHub link, and shrugging at those would be noise.
+
 ## Consequences
 
 - Video reposts arrive bare by default. A group that wants the old behaviour sets video to `Full`.

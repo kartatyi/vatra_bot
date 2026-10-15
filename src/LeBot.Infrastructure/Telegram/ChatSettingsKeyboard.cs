@@ -14,6 +14,7 @@ internal static class ChatSettingsKeyboard
     private const string VideoKey = "v";
     private const string PostKey = "p";
     private const string ButtonKey = "b";
+    private const string ShrugKey = "s";
     private const string On = "On";
     private const string Off = "Off";
     private const string Tick = "✅ ";
@@ -22,7 +23,8 @@ internal static class ChatSettingsKeyboard
         "⚙️ Settings for this chat\n\n" +
         "🎬 Video — the text under TikToks, Reels, Shorts\n" +
         "📝 Post — the text of Threads, X, Reddit and photo posts\n" +
-        "🔘 Button — a «" + RevealButton.Label + "» button under a repost whose text was hidden or cut\n\n" +
+        "🔘 Button — a «" + RevealButton.Label + "» button under a repost whose text was hidden or cut\n" +
+        "🤷 Shrug — a 🤷 on a link the bot couldn't fetch\n\n" +
         "Off: media only · Brief: no hashtags, a few lines · Full: as posted\n" +
         "Only group admins can change these.";
 
@@ -46,6 +48,10 @@ internal static class ChatSettingsKeyboard
             Button("🔘 Button on", ButtonKey, On, settings.OfferFullText),
             Button("🔘 Button off", ButtonKey, Off, !settings.OfferFullText),
         ],
+        [
+            Button("🤷 Shrug on", ShrugKey, On, settings.ShrugOnFailure),
+            Button("🤷 Shrug off", ShrugKey, Off, !settings.ShrugOnFailure),
+        ],
     ]);
 
     /// <summary>
@@ -68,14 +74,16 @@ internal static class ChatSettingsKeyboard
         }
 
         var (key, value) = (parts[0], parts[1]);
-        if (key == ButtonKey)
+        if (key is ButtonKey or ShrugKey)
         {
             if (value is not (On or Off))
             {
                 return false;
             }
 
-            updated = current with { OfferFullText = value == On };
+            updated = key == ButtonKey
+                ? current with { OfferFullText = value == On }
+                : current with { ShrugOnFailure = value == On };
             return true;
         }
 
@@ -92,7 +100,7 @@ internal static class ChatSettingsKeyboard
                 updated = current with { VideoCaption = mode };
                 return true;
             case PostKey when mode != CaptionMode.Off:
-                updated = new ChatSettings(current.VideoCaption, mode, current.OfferFullText);
+                updated = new ChatSettings(current.VideoCaption, mode, current.OfferFullText, current.ShrugOnFailure);
                 return true;
             default:
                 return false;

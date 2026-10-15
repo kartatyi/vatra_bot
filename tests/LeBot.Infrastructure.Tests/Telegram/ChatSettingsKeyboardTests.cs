@@ -10,6 +10,7 @@ public class ChatSettingsKeyboardTests
         ["🎬 Off", "✅ 🎬 Brief", "🎬 Full"],
         ["📝 Brief", "✅ 📝 Full"],
         ["✅ 🔘 Button on", "🔘 Button off"],
+        ["🤷 Shrug on", "✅ 🤷 Shrug off"],
     ];
 
     [Fact]
@@ -46,6 +47,27 @@ public class ChatSettingsKeyboardTests
         updated.Should().Be(new ChatSettings(video, post, offer));
     }
 
+    [Theory]
+    [InlineData("cfg:s:On", true)]
+    [InlineData("cfg:s:Off", false)]
+    public void TryApply_ShrugRow_TogglesOnlyTheShrug(string data, bool shrug)
+    {
+        var applied = ChatSettingsKeyboard.TryApply(data, ChatSettings.Default, out var updated);
+
+        applied.Should().BeTrue();
+        updated.Should().Be(ChatSettings.Default with { ShrugOnFailure = shrug });
+    }
+
+    [Fact]
+    public void TryApply_PostRow_KeepsTheShrugSetting()
+    {
+        var current = ChatSettings.Default with { ShrugOnFailure = true };
+
+        ChatSettingsKeyboard.TryApply("cfg:p:Brief", current, out var updated);
+
+        updated.ShrugOnFailure.Should().BeTrue();
+    }
+
     [Fact]
     public void TryApply_PostRow_KeepsTheButtonSetting()
     {
@@ -66,6 +88,7 @@ public class ChatSettingsKeyboardTests
     [InlineData("cfg:v:7")]
     [InlineData("cfg:v:full")]
     [InlineData("cfg:b:Maybe")]
+    [InlineData("cfg:s:Maybe")]
     [InlineData("cfg:v:Full:extra")]
     public void TryApply_UnknownOrForgedData_IsRejected(string? data)
     {
