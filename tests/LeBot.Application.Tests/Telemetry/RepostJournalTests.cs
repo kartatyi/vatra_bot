@@ -65,6 +65,26 @@ public class RepostJournalTests
     }
 
     [Fact]
+    public async Task RecordDeliveryFailureAsync_StoresFailureNamingTheDeliveryVariant()
+    {
+        var error = new DeliveryError.TelegramUnreachable("connection reset");
+
+        await CreateSut().RecordDeliveryFailureAsync(
+            Url, "YtDlpPlatformExtractor", error,
+            elapsed: TimeSpan.FromMilliseconds(30_000), chatId: 5, CancellationToken.None);
+
+        await _store.Received(1).AppendAsync(
+            Arg.Is<RepostEvent>(e =>
+                e.Outcome == RepostOutcome.Failure
+                && e.ErrorVariant == "TelegramUnreachable"
+                && e.ErrorReason == error.Reason
+                && e.Extractor == "YtDlpPlatformExtractor"
+                && e.MediaCount == 0
+                && e.MediaBytes == null),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task RecordTextFallbackAsync_RecordsOutcomeAndProducingExtractor()
     {
         await CreateSut().RecordTextFallbackAsync(

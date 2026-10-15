@@ -23,6 +23,9 @@ public sealed class RepostJournal(
     public Task RecordFailureAsync(Uri url, string extractor, ExtractionError extractionError, TimeSpan elapsed, long chatId, CancellationToken cancellationToken) =>
         AppendAsync(url, RepostOutcome.Failure, extractor, errorVariant: extractionError.GetType().Name, errorReason: extractionError.Reason, mediaCount: 0, mediaBytes: null, elapsed, chatId, cancellationToken);
 
+    public Task RecordDeliveryFailureAsync(Uri url, string extractor, DeliveryError deliveryError, TimeSpan elapsed, long chatId, CancellationToken cancellationToken) =>
+        AppendAsync(url, RepostOutcome.Failure, extractor, errorVariant: deliveryError.GetType().Name, errorReason: deliveryError.Reason, mediaCount: 0, mediaBytes: null, elapsed, chatId, cancellationToken);
+
     public Task RecordNothingExtractedAsync(Uri url, string extractor, TimeSpan elapsed, long chatId, CancellationToken cancellationToken) =>
         AppendAsync(url, RepostOutcome.NothingExtracted, extractor, errorVariant: null, errorReason: null, mediaCount: 0, mediaBytes: null, elapsed, chatId, cancellationToken);
 

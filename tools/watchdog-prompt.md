@@ -49,6 +49,11 @@ Decide what kind of failure this is before touching anything.
   extractor broke. This is the real target.
 - **`NetworkFailure`** — retry once. If it works now, it was transient: deliver the media
   if it is still fresh (see step 3b) and report, no code change.
+- **`TelegramUnreachable` / `TelegramRefused`** — extraction worked; the upload to Telegram
+  failed, and the bot already replied with the source link instead. Not an extractor bug —
+  skip step 2. `TelegramUnreachable` (connection reset, timeout) is transient: deliver if
+  still fresh (3b), no code change. `TelegramRefused` carries Telegram's error code; a `4xx`
+  on a file under the 50 MB cap may be a messenger defect (3c).
 
 ## Step 2 — reproduce
 

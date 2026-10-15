@@ -97,7 +97,7 @@ return new ExtractionError.UnsupportedPlatform(url);   // good — caller patter
 throw new NotSupportedException(url.Host);             // bad  — control flow by exception
 ```
 
-- Infrastructure surfaces expected failures as `Result`; it does not invent exception types. Transient Telegram `429`/`5xx` retry in [`TelegramBotMessenger`](src/LeBot.Infrastructure/Telegram/TelegramBotMessenger.cs) via Polly (exponential backoff + jitter, 3 attempts); permanent `4xx` falls through to a source-URL text reply.
+- Infrastructure surfaces expected failures as `Result`; it does not invent exception types. Transient Telegram failures — `429`/`5xx`, a dropped connection — retry in [`TelegramBotMessenger`](src/LeBot.Infrastructure/Telegram/TelegramBotMessenger.cs) via Polly (exponential backoff + jitter, 3 retries); a `4xx`, a timeout, or spent retries fall through to a source-URL text reply. A send has no value to return, so `ReplyWithMediaAsync` returns `DeliveryError?` ([`Media/DeliveryError.cs`](src/LeBot.Domain/Media/DeliveryError.cs), `null` = delivered) and the handler journals it as a `Failure` — an upload that throws past the handler leaves no row for the watchdog.
 - **Never crash on one bad update.** [`TelegramUpdateDispatcher`](src/LeBot.Infrastructure/Telegram/TelegramUpdateDispatcher.cs) wraps each update in try/catch, logs under its `CorrelationId`, and keeps polling; the poll loop itself catches and backs off 5 s. A broad `catch (Exception)` is allowed *only* here, at the boundary, and only because it logs and continues — never to swallow.
 
 ## Logging — Serilog, structured only

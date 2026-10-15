@@ -9,7 +9,11 @@ namespace LeBot.Application.Ports;
 public interface ITelegramMessenger
 {
     /// <summary>Posts the media items in the payload as a reply (caption holds the payload's body text).</summary>
-    Task ReplyWithMediaAsync(
+    /// <returns>
+    /// <c>null</c> once Telegram has accepted the media. Otherwise the reason it did not — by then the
+    /// implementation has already replied with the source link instead, so the chat is not left silent.
+    /// </returns>
+    Task<DeliveryError?> ReplyWithMediaAsync(
         long chatId,
         int replyToMessageId,
         MediaPayload payload,

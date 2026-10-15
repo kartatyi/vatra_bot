@@ -11,7 +11,7 @@ namespace LeBot.Application.Telemetry;
 /// <param name="Url">The full source URL, so a failing link can be retried by hand.</param>
 /// <param name="Outcome">What happened — see <see cref="RepostOutcome"/>.</param>
 /// <param name="Extractor">The extractor that produced this outcome (its type name), or null when no extractor claimed the URL.</param>
-/// <param name="ErrorVariant">For failures, the <see cref="Domain.Media.ExtractionError"/> variant name (e.g. <c>ContentUnavailable</c>); null otherwise.</param>
+/// <param name="ErrorVariant">For failures, the <see cref="Domain.Media.ExtractionError"/> or <see cref="Domain.Media.DeliveryError"/> variant name (e.g. <c>ContentUnavailable</c>, <c>TelegramUnreachable</c>); null otherwise.</param>
 /// <param name="ErrorReason">For failures, the human-readable reason (includes the yt-dlp detail); null otherwise.</param>
 /// <param name="MediaCount">Number of media items sent; 0 for non-media outcomes.</param>
 /// <param name="MediaBytes">Total bytes of the sent media when known; null when the extractor didn't report sizes.</param>
