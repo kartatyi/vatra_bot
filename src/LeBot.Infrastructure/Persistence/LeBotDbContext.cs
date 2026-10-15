@@ -21,6 +21,8 @@ public sealed class LeBotDbContext(DbContextOptions<LeBotDbContext> options) : D
 
     internal DbSet<PreparedPostRow> PreparedPosts => Set<PreparedPostRow>();
 
+    internal DbSet<MediaCache.StoredPostRow> StoredPosts => Set<MediaCache.StoredPostRow>();
+
     internal DbSet<ChatSettingsRow> ChatSettings => Set<ChatSettingsRow>();
 
     internal DbSet<RevealableTextRow> RevealableTexts => Set<RevealableTextRow>();
@@ -102,6 +104,17 @@ public sealed class LeBotDbContext(DbContextOptions<LeBotDbContext> options) : D
                 value => value.ToUniversalTime().ToString(occurredAtFormat, CultureInfo.InvariantCulture),
                 stored => DateTimeOffset.Parse(stored, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind))
             .IsRequired();
+
+        var stored = modelBuilder.Entity<MediaCache.StoredPostRow>();
+        stored.ToTable("StoredPosts");
+        stored.HasKey(p => p.LinkKey);
+        stored.Property(p => p.Document).IsRequired();
+        stored.Property(p => p.StoredAt)
+            .HasConversion(
+                value => value.ToUniversalTime().ToString(occurredAtFormat, CultureInfo.InvariantCulture),
+                parsed => DateTimeOffset.Parse(parsed, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind))
+            .IsRequired();
+        stored.HasIndex(p => p.StoredAt);
 
         var prepared = modelBuilder.Entity<PreparedPostRow>();
         prepared.ToTable("PreparedPosts");

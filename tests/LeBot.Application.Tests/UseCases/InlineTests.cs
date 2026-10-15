@@ -24,6 +24,8 @@ public class InlineTests
     {
         _urls.Extract(Arg.Any<string>()).Returns([Url]);
         _extractor.CanHandle(Url).Returns(true);
+        _cache.SaveAsync(Arg.Any<MediaPayload>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<MediaPayload>());
     }
 
     [Fact]

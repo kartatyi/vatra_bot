@@ -40,7 +40,7 @@ public static class DependencyInjection
         services.Configure<ThreadsOptions>(configuration.GetSection(ThreadsOptions.SectionName));
         services.Configure<MediaCacheOptions>(configuration.GetSection(MediaCacheOptions.SectionName));
         services.Configure<TelemetryOptions>(configuration.GetSection(TelemetryOptions.SectionName));
-        services.Configure<InlineOptions>(configuration.GetSection(InlineOptions.SectionName));
+        services.Configure<StorageOptions>(configuration.GetSection(StorageOptions.SectionName));
         services.Configure<StatsOptions>(configuration.GetSection(StatsOptions.SectionName));
 
         services.TryAddSingleton(TimeProvider.System);
@@ -96,7 +96,12 @@ public static class DependencyInjection
         // One instance behind two doors: the handler sees the port, the sweep service needs the
         // concrete type to call Prune().
         services.AddSingleton<FileSystemMediaCache>();
-        services.AddSingleton<IMediaCache>(sp => sp.GetRequiredService<FileSystemMediaCache>());
+        services.AddSingleton<TelegramMediaVault>();
+        services.AddSingleton<TelegramMediaCache>();
+        // With a storage chat, posts live in Telegram and nothing stays on disk; without one, the disk store.
+        services.AddSingleton<IMediaCache>(sp => sp.GetRequiredService<TelegramMediaVault>().IsConfigured
+            ? sp.GetRequiredService<TelegramMediaCache>()
+            : sp.GetRequiredService<FileSystemMediaCache>());
 
         // Sources Instagram session cookies (via the same YtDlp:CookiesFromBrowser the bot already
         // uses) so the private-API extractor below can authenticate.

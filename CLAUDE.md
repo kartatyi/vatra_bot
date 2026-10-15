@@ -181,7 +181,7 @@ yt-dlp knobs ([`YtDlpOptions`](src/LeBot.Infrastructure/Configuration/YtDlpOptio
 }
 ```
 
-Cache knobs ([`MediaCacheOptions`](src/LeBot.Infrastructure/Configuration/MediaCacheOptions.cs), `MediaCache` section) — the store that answers a repeat link without touching the platform:
+Cache knobs ([`MediaCacheOptions`](src/LeBot.Infrastructure/Configuration/MediaCacheOptions.cs), `MediaCache` section) — the store that answers a repeat link without touching the platform. With `Storage:ChatId` set it keeps file ids, not files, and `Directory` / `MaxTotalSizeMb` only govern the disk fallback:
 
 ```jsonc
 "MediaCache": {
@@ -192,12 +192,12 @@ Cache knobs ([`MediaCacheOptions`](src/LeBot.Infrastructure/Configuration/MediaC
 }
 ```
 
-Inline knobs ([`InlineOptions`](src/LeBot.Infrastructure/Configuration/InlineOptions.cs), `Inline` section) — `@bot <link>` in any chat ([ADR 0013](docs/decisions/0013-inline-mode.md)); BotFather `/setinline` must be on too:
+Storage knobs ([`StorageOptions`](src/LeBot.Infrastructure/Configuration/StorageOptions.cs), `Storage` section) — the private channel every post's media is uploaded to once and then sent anywhere by file id; it backs the media cache ([ADR 0015](docs/decisions/0015-telegram-media-store.md)) and inline mode ([ADR 0013](docs/decisions/0013-inline-mode.md), which also needs BotFather `/setinline` + `/setinlinefeedback`):
 
 ```jsonc
-"Inline": {
-  "StorageChatId": null   // private channel the bot uploads to — deployment identity: user-secrets / env only;
-                          // unset, inline answers text posts only and every media post "couldn't get media"
+"Storage": {
+  "ChatId": null   // deployment identity: user-secrets / env only. Unset → the disk cache below, and inline
+                   // mode answers text posts only
 }
 ```
 
