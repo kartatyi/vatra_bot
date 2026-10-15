@@ -24,7 +24,7 @@ internal sealed class SqliteChatSettingsStore(
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
             var row = await db.ChatSettings.AsNoTracking()
                 .FirstOrDefaultAsync(r => r.ChatHash == chatHash, cancellationToken);
-            return row is null ? ChatSettings.Default : new ChatSettings(row.VideoCaption, row.PostCaption, row.OfferFullText, row.ShrugOnFailure);
+            return row is null ? ChatSettings.Default : new ChatSettings(row.VideoCaption, row.PostCaption, row.OfferFullText, row.ShrugOnFailure, row.WeeklyDigest);
         }
         catch (Exception ex) when (ex is SqliteException or InvalidOperationException)
         {
@@ -49,7 +49,18 @@ internal sealed class SqliteChatSettingsStore(
         row.PostCaption = settings.PostCaption;
         row.OfferFullText = settings.OfferFullText;
         row.ShrugOnFailure = settings.ShrugOnFailure;
+        row.WeeklyDigest = settings.WeeklyDigest;
+        row.ChatId = settings.WeeklyDigest ? chatId : null;
         row.UpdatedAt = timeProvider.GetUtcNow();
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<long>> GetDigestChatIdsAsync(CancellationToken cancellationToken)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        return await db.ChatSettings.AsNoTracking()
+            .Where(r => r.WeeklyDigest && r.ChatId != null)
+            .Select(r => r.ChatId ?? 0) // "?? 0" never fires: the filter keeps rows with an id
+            .ToListAsync(cancellationToken);
     }
 }

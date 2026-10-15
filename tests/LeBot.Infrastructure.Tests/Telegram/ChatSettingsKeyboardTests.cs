@@ -11,6 +11,7 @@ public class ChatSettingsKeyboardTests
         ["📝 Brief", "✅ 📝 Full"],
         ["✅ 🔘 Button on", "🔘 Button off"],
         ["🤷 Shrug on", "✅ 🤷 Shrug off"],
+        ["📬 Digest on", "✅ 📬 Digest off"],
     ];
 
     [Fact]
@@ -56,6 +57,22 @@ public class ChatSettingsKeyboardTests
 
         applied.Should().BeTrue();
         updated.Should().Be(ChatSettings.Default with { ShrugOnFailure = shrug });
+    }
+
+    [Fact]
+    public void TryApply_DigestRow_TurnsTheDigestOn()
+    {
+        ChatSettingsKeyboard.TryApply("cfg:d:On", ChatSettings.Default, out var updated).Should().BeTrue();
+
+        updated.Should().Be(ChatSettings.Default with { WeeklyDigest = true });
+    }
+
+    [Fact]
+    public void TryApply_PostRow_KeepsTheDigestSetting()
+    {
+        ChatSettingsKeyboard.TryApply("cfg:p:Brief", ChatSettings.Default with { WeeklyDigest = true }, out var updated);
+
+        updated.WeeklyDigest.Should().BeTrue();
     }
 
     [Fact]

@@ -30,6 +30,17 @@ public sealed class SqliteStatsOptOutStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task GetOptedOutAsync_ListsThatChatsOptOutsOnly()
+    {
+        await _sut.SetOptedOutAsync(-100123, 7, optedOut: true, CancellationToken.None);
+        await _sut.SetOptedOutAsync(-100999, 8, optedOut: true, CancellationToken.None);
+
+        (await _sut.GetOptedOutAsync(-100123, CancellationToken.None)).Should().ContainSingle().Which.Should().Be(7);
+        (await _sut.IsOptedOutAsync(-100123, 7, CancellationToken.None)).Should().BeTrue();
+        (await _sut.IsOptedOutAsync(-100123, 8, CancellationToken.None)).Should().BeFalse();
+    }
+
+    [Fact]
     public async Task SetOptedOutAsync_TrueTwice_IsIdempotent()
     {
         await _sut.SetOptedOutAsync(-100123, 7, optedOut: true, CancellationToken.None);

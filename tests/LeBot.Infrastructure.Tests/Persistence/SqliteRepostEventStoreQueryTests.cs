@@ -156,6 +156,21 @@ public sealed class SqliteRepostEventStoreQueryTests : IDisposable
     }
 
     [Fact]
+    public async Task GetRepostRowsAsync_ReturnsOneChatsRepostsInsideTheWindow()
+    {
+        await SeedAsync(
+            Event(RepostOutcome.MediaRepost, host: "tiktok.com", occurredAt: BaseInstant, sender: 1),
+            Event(RepostOutcome.TextFallback, host: "x.com", occurredAt: BaseInstant.AddHours(1), sender: null),
+            Event(RepostOutcome.Failure, host: "x.com", occurredAt: BaseInstant, sender: 1),
+            Event(RepostOutcome.MediaRepost, occurredAt: BaseInstant.AddDays(7), sender: 1),
+            Event(RepostOutcome.MediaRepost, occurredAt: BaseInstant, sender: 1, chatHash: "chat-b"));
+
+        var rows = await _sut.GetRepostRowsAsync("chat-a", BaseInstant, BaseInstant.AddDays(7), CancellationToken.None);
+
+        rows.Should().BeEquivalentTo(new[] { new RepostRow(1, "tiktok.com"), new RepostRow(null, "x.com") });
+    }
+
+    [Fact]
     public async Task GetSenderHostCountsAsync_HonoursTheWindow()
     {
         await SeedAsync(
