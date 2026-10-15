@@ -1,3 +1,4 @@
+using LeBot.Domain.Common;
 using LeBot.Domain.Media;
 using LeBot.Infrastructure.Configuration;
 using LeBot.Infrastructure.MediaExtraction.YtDlp;
@@ -103,5 +104,28 @@ public class YtDlpPlatformExtractorCookieRetryTests
         var error = new ExtractionError.ContentUnavailable(url, "HTTP Error 401: Unauthorized");
 
         CreateSut("firefox").ShouldRetryWithCookies(url, error).Should().BeFalse();
+    }
+
+    [Fact]
+    public void KeepAnonymousFailureOverEmptyRetry_CookiedPassFoundOnlyText_ReturnsAnonymousFailure()
+    {
+        var anonymous = new Result<MediaPayload, ExtractionError>.Err(new ExtractionError.ToolFailure("HTTP Error 403: Forbidden"));
+        var cookied = Result<MediaPayload, ExtractionError>.Success(new MediaPayload(ReelUrl, "title", null, [], null));
+
+        var result = YtDlpPlatformExtractor.KeepAnonymousFailureOverEmptyRetry(anonymous, cookied);
+
+        result.Should().BeSameAs(anonymous);
+    }
+
+    [Fact]
+    public void KeepAnonymousFailureOverEmptyRetry_CookiedPassFoundMedia_ReturnsIt()
+    {
+        var anonymous = new Result<MediaPayload, ExtractionError>.Err(new ExtractionError.ToolFailure("HTTP Error 403: Forbidden"));
+        var item = new MediaItem("clip.mp4", MediaKind.Video, "video/mp4", 1, null);
+        var cookied = Result<MediaPayload, ExtractionError>.Success(new MediaPayload(ReelUrl, "title", null, [item], null));
+
+        var result = YtDlpPlatformExtractor.KeepAnonymousFailureOverEmptyRetry(anonymous, cookied);
+
+        result.Should().BeSameAs(cookied);
     }
 }

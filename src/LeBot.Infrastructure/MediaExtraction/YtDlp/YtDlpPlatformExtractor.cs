@@ -77,11 +77,23 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
             url,
             err.Error.Reason);
 
-        return await ExtractWithOptionsAsync(
+        var cookied = await ExtractWithOptionsAsync(
             url,
             BuildOptionSet(withBrowserCookies: true),
             cancellationToken);
+        return KeepAnonymousFailureOverEmptyRetry(err, cookied);
     }
+
+    /// <summary>
+    /// The cookied pass wins unless it found no media either. A session that yields only a title
+    /// has not recovered the post: YouTube, for one, lists nothing but storyboards to a logged-in
+    /// client it cannot verify, after the anonymous download already died on a 403. Returning that
+    /// title as a success would hide the real failure from the journal, the stats and the watchdog.
+    /// </summary>
+    internal static Result<MediaPayload, ExtractionError> KeepAnonymousFailureOverEmptyRetry(
+        Result<MediaPayload, ExtractionError>.Err anonymous,
+        Result<MediaPayload, ExtractionError> cookied) =>
+        cookied is Result<MediaPayload, ExtractionError>.Ok { Value.HasMedia: false } ? anonymous : cookied;
 
     /// <summary>
     /// True when a failed anonymous attempt is worth repeating with the browser session. Needs
