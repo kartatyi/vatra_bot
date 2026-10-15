@@ -2,8 +2,10 @@ using LeBot.Domain.Media;
 using LeBot.Infrastructure.Telegram;
 using Microsoft.Extensions.Logging.Abstractions;
 using Telegram.Bot;
+using Telegram.Bot.Requests;
 using Telegram.Bot.Requests.Abstractions;
 using Telegram.Bot.Types;
+using Telegram.Bot.Types.ReplyMarkups;
 
 namespace LeBot.Infrastructure.Tests.Telegram;
 
@@ -20,7 +22,41 @@ public sealed class TelegramBotMessengerTests : IDisposable
     private readonly string _dir = Path.Combine(
         Path.GetTempPath(), "lebot-messenger-tests", Guid.NewGuid().ToString("N"));
 
-    public TelegramBotMessengerTests() => Directory.CreateDirectory(_dir);
+    public TelegramBotMessengerTests()
+    {
+        Directory.CreateDirectory(_dir);
+
+        // Real Telegram always answers a send with the message it created; the messenger reads its id.
+        _bot.SendRequest(Arg.Any<IRequest<Message>>(), Arg.Any<CancellationToken>()).Returns(new Message { Id = 99 });
+    }
+
+    [Fact]
+    public async Task ReplyWithMediaAsync_HeldBackText_AttachesRevealButton_ReturnsMessageId()
+    {
+        var payload = new MediaPayload(Source, null, null, [Video(WriteFile("clip.mp4"))]) { RevealableText = "the recipe" };
+
+        var sentId = await CreateSut().ReplyWithMediaAsync(1L, 2, payload, CancellationToken.None);
+
+        sentId.Should().Be(99);
+        await _bot.Received(1).SendRequest(
+            Arg.Is<SendVideoRequest>(r => IsRevealButton(r.ReplyMarkup)),
+            Arg.Any<CancellationToken>());
+    }
+
+    private static bool IsRevealButton(ReplyMarkup? markup) =>
+        markup is InlineKeyboardMarkup keyboard &&
+        keyboard.InlineKeyboard.Single().Single().CallbackData == RevealButton.CallbackData;
+
+    [Fact]
+    public async Task ReplyWithMediaAsync_NothingHeldBack_SendsNoButton()
+    {
+        var payload = new MediaPayload(Source, null, null, [Video(WriteFile("clip.mp4"))]);
+
+        await CreateSut().ReplyWithMediaAsync(1L, 2, payload, CancellationToken.None);
+
+        await _bot.Received(1).SendRequest(
+            Arg.Is<SendVideoRequest>(r => r.ReplyMarkup == null), Arg.Any<CancellationToken>());
+    }
 
     [Fact]
     public async Task ReplyWithMediaAsync_DownloadedFile_IsDeletedOnceSent()

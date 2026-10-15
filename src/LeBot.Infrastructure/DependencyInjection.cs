@@ -59,6 +59,8 @@ public static class DependencyInjection
             dbOptions.UseSqlite(connectionString);
         });
         services.AddSingleton<IRepostEventStore, SqliteRepostEventStore>();
+        services.AddSingleton<IChatSettingsStore, SqliteChatSettingsStore>();
+        services.AddSingleton<IRevealableTextStore, SqliteRevealableTextStore>();
 
         services.AddSingleton<ITelegramBotClient>(sp =>
         {
