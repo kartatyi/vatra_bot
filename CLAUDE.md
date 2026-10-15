@@ -201,6 +201,14 @@ Inline knobs ([`InlineOptions`](src/LeBot.Infrastructure/Configuration/InlineOpt
 }
 ```
 
+Stats knobs ([`StatsOptions`](src/LeBot.Infrastructure/Configuration/StatsOptions.cs), `Stats` section) — the clock `/leaders` badges and `/me` read:
+
+```jsonc
+"Stats": {
+  "TimeZone": "Europe/Kyiv"  // IANA or Windows id; 🦉 "night" is 00:00–05:00 here. Unknown on the host → UTC, with a warning
+}
+```
+
 ## Docs
 
 | File | For | Holds |

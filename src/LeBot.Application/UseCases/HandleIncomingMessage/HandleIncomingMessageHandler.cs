@@ -71,7 +71,7 @@ public sealed class HandleIncomingMessageHandler(
 
         // Whether this chat has seen the link before is settled first, so the answer can't depend on
         // whether the repost below works out.
-        var isRepeat = await seenLinks.MarkSeenAsync(message.ChatId, url, cancellationToken);
+        var isRepeat = await seenLinks.MarkSeenAsync(message.ChatId, url, message.SenderId, cancellationToken);
         LinkReaction? settled = isRepeat ? LinkReaction.Repeat : null;
 
         // Ask the cache before any extractor runs: a link the chat has already seen is answered

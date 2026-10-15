@@ -15,6 +15,7 @@ public static class DependencyInjection
     {
         services.AddSingleton<RepostMetrics>();
         services.AddSingleton<IRepostJournal, RepostJournal>();
+        services.AddSingleton<PersonStats>();
         services.AddSingleton<HandleIncomingMessageHandler>();
         services.AddSingleton<InlinePostPreparer>();
         services.AddSingleton<AnswerInlineQueryHandler>();

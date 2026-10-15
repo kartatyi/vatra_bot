@@ -18,6 +18,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Telegram.Bot;
 
@@ -39,6 +40,7 @@ public static class DependencyInjection
         services.Configure<MediaCacheOptions>(configuration.GetSection(MediaCacheOptions.SectionName));
         services.Configure<TelemetryOptions>(configuration.GetSection(TelemetryOptions.SectionName));
         services.Configure<InlineOptions>(configuration.GetSection(InlineOptions.SectionName));
+        services.Configure<StatsOptions>(configuration.GetSection(StatsOptions.SectionName));
 
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IHostAccountInfo, HostAccountInfo>();
@@ -64,6 +66,10 @@ public static class DependencyInjection
         services.AddSingleton<IInlineMediaUploader, TelegramInlineMediaUploader>();
         services.AddSingleton<IInlineAnswerer, TelegramInlineAnswerer>();
         services.AddSingleton<ISeenLinkStore, SqliteSeenLinkStore>();
+        services.AddSingleton<IPersonStatsStore, SqlitePersonStatsStore>();
+        services.AddSingleton(sp => StatsTimeZoneResolver.Resolve(
+            sp.GetRequiredService<IOptions<StatsOptions>>().Value.TimeZone,
+            sp.GetRequiredService<ILoggerFactory>().CreateLogger("LeBot.Stats")));
         services.AddSingleton<IStatsOptOutStore, SqliteStatsOptOutStore>();
         services.AddSingleton<IChatSettingsStore, SqliteChatSettingsStore>();
         services.AddSingleton<IRevealableTextStore, SqliteRevealableTextStore>();
