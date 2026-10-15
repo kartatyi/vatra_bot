@@ -105,6 +105,29 @@ namespace LeBot.Infrastructure.Persistence.Migrations
                     b.ToTable("ChatSettings", (string)null);
                 });
 
+            modelBuilder.Entity("LeBot.Infrastructure.Persistence.PreparedPostRow", b =>
+                {
+                    b.Property<string>("LinkKey")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Body")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FileId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PreparedAt")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("LinkKey");
+
+                    b.ToTable("PreparedPosts", (string)null);
+                });
+
             modelBuilder.Entity("LeBot.Infrastructure.Persistence.RevealableTextRow", b =>
                 {
                     b.Property<string>("ChatHash")

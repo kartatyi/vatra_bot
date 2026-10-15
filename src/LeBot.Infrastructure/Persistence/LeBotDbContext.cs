@@ -19,6 +19,8 @@ public sealed class LeBotDbContext(DbContextOptions<LeBotDbContext> options) : D
 
     internal DbSet<SeenLinkRow> SeenLinks => Set<SeenLinkRow>();
 
+    internal DbSet<PreparedPostRow> PreparedPosts => Set<PreparedPostRow>();
+
     internal DbSet<ChatSettingsRow> ChatSettings => Set<ChatSettingsRow>();
 
     internal DbSet<RevealableTextRow> RevealableTexts => Set<RevealableTextRow>();
@@ -94,6 +96,16 @@ public sealed class LeBotDbContext(DbContextOptions<LeBotDbContext> options) : D
         seenLink.ToTable("SeenLinks");
         seenLink.HasKey(s => new { s.ChatHash, s.LinkKey });
         seenLink.Property(s => s.FirstSeenAt)
+            .HasConversion(
+                value => value.ToUniversalTime().ToString(occurredAtFormat, CultureInfo.InvariantCulture),
+                stored => DateTimeOffset.Parse(stored, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind))
+            .IsRequired();
+
+        var prepared = modelBuilder.Entity<PreparedPostRow>();
+        prepared.ToTable("PreparedPosts");
+        prepared.HasKey(p => p.LinkKey);
+        prepared.Property(p => p.Kind).HasConversion<string>();
+        prepared.Property(p => p.PreparedAt)
             .HasConversion(
                 value => value.ToUniversalTime().ToString(occurredAtFormat, CultureInfo.InvariantCulture),
                 stored => DateTimeOffset.Parse(stored, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind))

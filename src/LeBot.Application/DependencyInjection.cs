@@ -1,5 +1,6 @@
 using LeBot.Application.Metrics;
 using LeBot.Application.Telemetry;
+using LeBot.Application.UseCases.AnswerInlineQuery;
 using LeBot.Application.UseCases.HandleIncomingMessage;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -15,6 +16,8 @@ public static class DependencyInjection
         services.AddSingleton<RepostMetrics>();
         services.AddSingleton<IRepostJournal, RepostJournal>();
         services.AddSingleton<HandleIncomingMessageHandler>();
+        services.AddSingleton<InlinePostPreparer>();
+        services.AddSingleton<AnswerInlineQueryHandler>();
         return services;
     }
 }

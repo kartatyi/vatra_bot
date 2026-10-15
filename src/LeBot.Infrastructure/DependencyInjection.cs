@@ -38,6 +38,7 @@ public static class DependencyInjection
         services.Configure<ThreadsOptions>(configuration.GetSection(ThreadsOptions.SectionName));
         services.Configure<MediaCacheOptions>(configuration.GetSection(MediaCacheOptions.SectionName));
         services.Configure<TelemetryOptions>(configuration.GetSection(TelemetryOptions.SectionName));
+        services.Configure<InlineOptions>(configuration.GetSection(InlineOptions.SectionName));
 
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IHostAccountInfo, HostAccountInfo>();
@@ -59,6 +60,9 @@ public static class DependencyInjection
             dbOptions.UseSqlite(connectionString);
         });
         services.AddSingleton<IRepostEventStore, SqliteRepostEventStore>();
+        services.AddSingleton<IPreparedPostStore, SqlitePreparedPostStore>();
+        services.AddSingleton<IInlineMediaUploader, TelegramInlineMediaUploader>();
+        services.AddSingleton<IInlineAnswerer, TelegramInlineAnswerer>();
         services.AddSingleton<ISeenLinkStore, SqliteSeenLinkStore>();
         services.AddSingleton<IStatsOptOutStore, SqliteStatsOptOutStore>();
         services.AddSingleton<IChatSettingsStore, SqliteChatSettingsStore>();

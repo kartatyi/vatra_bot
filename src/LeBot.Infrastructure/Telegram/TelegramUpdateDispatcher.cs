@@ -2,6 +2,7 @@ using System.Globalization;
 using LeBot.Application.Metrics;
 using LeBot.Application.Ports;
 using LeBot.Application.Telemetry;
+using LeBot.Application.UseCases.AnswerInlineQuery;
 using LeBot.Application.UseCases.HandleIncomingMessage;
 using LeBot.Infrastructure.Configuration;
 using LeBot.Infrastructure.Maintenance;
@@ -24,6 +25,7 @@ namespace LeBot.Infrastructure.Telegram;
 public sealed class TelegramUpdateDispatcher(
     ITelegramBotClient bot,
     HandleIncomingMessageHandler handler,
+    AnswerInlineQueryHandler inlineHandler,
     RepostMetrics metrics,
     IRepostEventStore eventStore,
     IStatsOptOutStore optOuts,
@@ -76,7 +78,7 @@ public sealed class TelegramUpdateDispatcher(
                     offset: offset,
                     limit: 100,
                     timeout: _options.PollingTimeoutSeconds,
-                    allowedUpdates: [UpdateType.Message, UpdateType.CallbackQuery],
+                    allowedUpdates: [UpdateType.Message, UpdateType.CallbackQuery, UpdateType.InlineQuery],
                     cancellationToken: stoppingToken);
 
                 if (!announcedServing)
@@ -119,6 +121,14 @@ public sealed class TelegramUpdateDispatcher(
             ["CorrelationId"] = update.Id,
         });
 
+        if (update.InlineQuery is { } inlineQuery)
+        {
+            // Not awaited: an inline answer may wait seconds for a download, and the poll loop handles
+            // one update at a time — awaiting here would stall every group's reposts behind it.
+            _ = AnswerInlineAsync(update.Id, inlineQuery, cancellationToken);
+            return;
+        }
+
         try
         {
             if (update.CallbackQuery is { } callback)
@@ -153,6 +163,29 @@ public sealed class TelegramUpdateDispatcher(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "Unhandled error processing update {UpdateId}", update.Id);
+        }
+    }
+
+    /// <summary>
+    /// Answers one inline query off the poll loop. Runs detached, so it is its own boundary: it opens the
+    /// update's logging scope itself and logs — never rethrows — anything that escapes.
+    /// </summary>
+    private async Task AnswerInlineAsync(int updateId, global::Telegram.Bot.Types.InlineQuery inlineQuery, CancellationToken cancellationToken)
+    {
+        using var scope = logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = updateId });
+        try
+        {
+            await inlineHandler.HandleAsync(
+                new Application.UseCases.AnswerInlineQuery.InlineQuery(inlineQuery.Id, inlineQuery.Query),
+                cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Shutting down; the query dies with the bot.
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Unhandled error answering inline update {UpdateId}", updateId);
         }
     }
 
