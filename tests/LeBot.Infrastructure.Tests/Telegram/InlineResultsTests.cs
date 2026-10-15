@@ -12,7 +12,7 @@ public class InlineResultsTests
     [Fact]
     public void For_ReadyVideoWithText_OffersBareAndCaptioned()
     {
-        var (results, cache) = InlineResults.For(new InlineAnswer.Ready(new PreparedPost(MediaKind.Video, "f", "the post")));
+        var (results, cache) = InlineResults.For(new InlineAnswer.Ready(new PreparedPost(MediaKind.Video, "f", "the post"), Url));
 
         results.Should().HaveCount(3);
         var bare = results[0].Should().BeOfType<InlineQueryResultCachedVideo>().Subject;
@@ -28,7 +28,7 @@ public class InlineResultsTests
     [Fact]
     public void For_ReadyVideoWithoutText_OffersOnlyTheBareVideo()
     {
-        var (results, _) = InlineResults.For(new InlineAnswer.Ready(new PreparedPost(MediaKind.Video, "f", null)));
+        var (results, _) = InlineResults.For(new InlineAnswer.Ready(new PreparedPost(MediaKind.Video, "f", null), Url));
 
         results.Should().ContainSingle().Which.Should().BeOfType<InlineQueryResultCachedVideo>();
     }
@@ -36,17 +36,23 @@ public class InlineResultsTests
     [Fact]
     public void For_ReadyPhoto_UsesPhotoResultsAndLabels()
     {
-        var (results, _) = InlineResults.For(new InlineAnswer.Ready(new PreparedPost(MediaKind.Photo, "p", "listing")));
+        var (results, cache) = InlineResults.For(new InlineAnswer.Ready(new PreparedPost(MediaKind.Photo, "p", "listing"), Url));
 
-        // Not all photos: the text-only article is what makes clients list the choices instead of a title-less grid.
-        results.Should().NotBeEmpty().And.Contain(r => r is InlineQueryResultArticle);
-        results.OfType<InlineQueryResultCachedPhoto>().Select(r => r.Title).Should().Equal("🖼 Photo", "🖼 Photo + text");
+        // Titled placeholders, not photo results — clients show photo results without titles.
+        var articles = results.Should().AllBeOfType<InlineQueryResultArticle>().Subject.ToList();
+        articles.Select(a => a.Title).Should().Equal("🖼 Photo", "🖼 Photo + text", InlineResults.TextOnlyTitle);
+        articles[0].Description.Should().Be(InlineResults.WithoutTextDescription);
+        InlineResults.TryParsePending(articles[0].Id, out var bareWithText).Should().BeTrue();
+        InlineResults.TryParsePending(articles[1].Id, out var textWithText).Should().BeTrue();
+        (bareWithText, textWithText).Should().Be((false, true));
+        articles[0].ReplyMarkup.Should().NotBeNull();
+        cache.Should().Be(0);
     }
 
     [Fact]
     public void For_ReadyTextOnly_OffersOneTextArticle()
     {
-        var (results, _) = InlineResults.For(new InlineAnswer.Ready(new PreparedPost(null, null, "words")));
+        var (results, _) = InlineResults.For(new InlineAnswer.Ready(new PreparedPost(null, null, "words"), Url));
 
         var article = results.Should().ContainSingle().Which.Should().BeOfType<InlineQueryResultArticle>().Subject;
         article.Title.Should().Be("📝 Text");
@@ -56,7 +62,7 @@ public class InlineResultsTests
     [Fact]
     public void For_LongCaption_IsCutToTelegramsLimit()
     {
-        var (results, _) = InlineResults.For(new InlineAnswer.Ready(new PreparedPost(MediaKind.Video, "f", new string('a', 2000))));
+        var (results, _) = InlineResults.For(new InlineAnswer.Ready(new PreparedPost(MediaKind.Video, "f", new string('a', 2000)), Url));
 
         results[1].Should().BeOfType<InlineQueryResultCachedVideo>().Which.Caption!.Length.Should().Be(1024);
     }

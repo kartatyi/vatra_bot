@@ -32,6 +32,9 @@ internal static class InlineResults
     /// </summary>
     public static (IReadOnlyList<InlineQueryResult> Results, int CacheSeconds) For(InlineAnswer answer) => answer switch
     {
+        // Photo choices are placeholders, and a placeholder is filled in by the chosen-result path —
+        // a result Telegram served from its own cache wouldn't be, so they're not cached either.
+        InlineAnswer.Ready { Post: { HasMedia: true, Kind: MediaKind.Photo } } ready => (PhotoResults(ready.Post, ready.Url), 0),
         InlineAnswer.Ready { Post.HasMedia: true } ready => (MediaResults(ready.Post), 300),
         InlineAnswer.Ready ready => (TextResults(ready.Post), 300),
         InlineAnswer.NotReady notReady => (PendingResults(notReady.Url), 0),
@@ -67,6 +70,28 @@ internal static class InlineResults
     }
 
     /// <summary>
+    /// A photo post's choices, as titled placeholders rather than photo results: clients show photo results
+    /// as bare thumbnails — no title, no description, in a grid or a list alike — so "photo" and "photo +
+    /// text" can't be told apart. Choosing one sends the placeholder, and the chosen-result path swaps the
+    /// stored photo into it straight away.
+    /// </summary>
+    private static List<InlineQueryResult> PhotoResults(PreparedPost post, Uri url)
+    {
+        var content = new InputTextMessageContent($"{LoadingText}\n{url.AbsoluteUri}");
+        List<InlineQueryResult> results =
+        [
+            new InlineQueryResultArticle(PendingBareId, "🖼 Photo", content) { Description = WithoutTextDescription, ReplyMarkup = OriginalLink(url) },
+        ];
+        if (post.Body is { } body)
+        {
+            results.Add(new InlineQueryResultArticle(PendingTextId, "🖼 Photo + text", content) { Description = Preview(body), ReplyMarkup = OriginalLink(url) });
+            results.Add(TextOnly(body));
+        }
+
+        return results;
+    }
+
+    /// <summary>
     /// The bare file, and — when the post has text — the file with the text as its caption, plus the text on
     /// its own. The text-only result is also what keeps the choices readable: clients lay out an all-photo
     /// answer as a grid of thumbnails with no titles, so "photo" and "photo + text" would look identical;
@@ -88,10 +113,7 @@ internal static class InlineResults
         if (post.Body is { } body)
         {
             results.Add(Media("text", kind, fileId, labelWithText, Fit(body, CaptionLimit), Preview(body)));
-            results.Add(new InlineQueryResultArticle("text-only", TextOnlyTitle, new InputTextMessageContent(Fit(body, TextLimit)))
-            {
-                Description = Preview(body),
-            });
+            results.Add(TextOnly(body));
         }
 
         return results;
@@ -109,6 +131,9 @@ internal static class InlineResults
         MediaKind.Audio => new InlineQueryResultCachedAudio(id, fileId) { Caption = caption },
         _ => new InlineQueryResultCachedVideo(id, fileId, title) { Caption = caption, Description = description },
     };
+
+    private static InlineQueryResultArticle TextOnly(string body) =>
+        new("text-only", TextOnlyTitle, new InputTextMessageContent(Fit(body, TextLimit))) { Description = Preview(body) };
 
     /// <summary>Choosing it sends the link itself — in a chat with the bot, that still gets reposted.</summary>
     private static InlineQueryResultArticle LinkArticle(string id, string title, Uri url) =>
