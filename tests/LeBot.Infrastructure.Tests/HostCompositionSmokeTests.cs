@@ -3,6 +3,8 @@ using LeBot.Application.Ports;
 using LeBot.Application.UseCases.HandleIncomingMessage;
 using LeBot.Infrastructure.Configuration;
 using LeBot.Infrastructure.Maintenance;
+using LeBot.Infrastructure.MediaExtraction.Steam;
+using LeBot.Infrastructure.MediaExtraction.YtDlp;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -19,26 +21,7 @@ public class HostCompositionSmokeTests
     [Fact]
     public void DiGraph_ResolvesEveryPort()
     {
-        var builder = Host.CreateApplicationBuilder([]);
-
-        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            ["Telegram:BotToken"] = "0123456789:placeholder-token-for-resolution-only",
-            ["YtDlp:BinaryPath"] = "yt-dlp",
-            ["YtDlp:DownloadDirectory"] = Path.Combine(Path.GetTempPath(), "lebot-smoke-test"),
-            ["YtDlp:MaxFileSizeMb"] = "50",
-            ["Update:Enabled"] = "true",
-            ["Update:Mode"] = "Apply",
-            ["Update:Repository"] = "kartatyi/vatra_bot",
-            ["Update:AssetName"] = "LeBot.Host.exe",
-            ["Update:CheckIntervalHours"] = "24",
-            ["Update:StartupDelayMinutes"] = "2",
-        });
-
-        builder.Services.AddApplicationServices();
-        builder.Services.AddInfrastructureServices(builder.Configuration);
-
-        using var host = builder.Build();
+        using var host = BuildHost();
 
         // The application use-case resolves only when every port behind it does too,
         // so this single call exercises the full Domain → Application → Infrastructure chain.
@@ -57,6 +40,19 @@ public class HostCompositionSmokeTests
         host.Services.GetRequiredService<IReleaseSource>().Should().NotBeNull();
         host.Services.GetRequiredService<IAppVersion>().Should().NotBeNull();
         host.Services.GetRequiredService<IUpdateInstaller>().Should().NotBeNull();
+    }
+
+    [Fact]
+    public void DiGraph_RegistersSteamExtractorAheadOfYtDlp()
+    {
+        using var host = BuildHost();
+
+        var order = host.Services.GetServices<IPlatformExtractor>().Select(e => e.GetType()).ToList();
+
+        // yt-dlp claims Steam links too and, on a page with several trailers, returns media — which
+        // ends the chain. Registration order is the priority, so it has to be pinned.
+        order.IndexOf(typeof(SteamStoreExtractor)).Should().BeGreaterThanOrEqualTo(0)
+            .And.BeLessThan(order.IndexOf(typeof(YtDlpPlatformExtractor)));
     }
 
     [Fact]
@@ -97,5 +93,29 @@ public class HostCompositionSmokeTests
         var sinks = configuration.GetSection("Serilog:WriteTo").GetChildren().ToList();
         sinks.Should().Contain(sink => sink["Name"] == "File", "logging must survive a missing appsettings.json");
         sinks.Should().Contain(sink => sink["Name"] == "Console");
+    }
+
+    private static IHost BuildHost()
+    {
+        var builder = Host.CreateApplicationBuilder([]);
+
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Telegram:BotToken"] = "0123456789:placeholder-token-for-resolution-only",
+            ["YtDlp:BinaryPath"] = "yt-dlp",
+            ["YtDlp:DownloadDirectory"] = Path.Combine(Path.GetTempPath(), "lebot-smoke-test"),
+            ["YtDlp:MaxFileSizeMb"] = "50",
+            ["Update:Enabled"] = "true",
+            ["Update:Mode"] = "Apply",
+            ["Update:Repository"] = "kartatyi/vatra_bot",
+            ["Update:AssetName"] = "LeBot.Host.exe",
+            ["Update:CheckIntervalHours"] = "24",
+            ["Update:StartupDelayMinutes"] = "2",
+        });
+
+        builder.Services.AddApplicationServices();
+        builder.Services.AddInfrastructureServices(builder.Configuration);
+
+        return builder.Build();
     }
 }

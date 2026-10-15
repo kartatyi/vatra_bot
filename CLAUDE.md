@@ -192,6 +192,15 @@ Cache knobs ([`MediaCacheOptions`](src/LeBot.Infrastructure/Configuration/MediaC
 }
 ```
 
+Steam knobs ([`SteamOptions`](src/LeBot.Infrastructure/Configuration/SteamOptions.cs), `Steam` section) — the storefront a store link is read from; its trailer is merged by yt-dlp, so it needs ffmpeg beside the binary:
+
+```jsonc
+"Steam": {
+  "CountryCode": "ua",     // prices quoted in this region's currency; unset, the API mixes regions per request
+  "Language": "ukrainian"  // Steam's name for it — localises genres, dates, the review verdict, translated descriptions
+}
+```
+
 ## Docs
 
 | File | For | Holds |

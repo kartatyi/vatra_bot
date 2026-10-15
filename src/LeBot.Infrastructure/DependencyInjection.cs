@@ -6,6 +6,7 @@ using LeBot.Infrastructure.Maintenance;
 using LeBot.Infrastructure.MediaCache;
 using LeBot.Infrastructure.MediaExtraction.AutoRia;
 using LeBot.Infrastructure.MediaExtraction.Instagram;
+using LeBot.Infrastructure.MediaExtraction.Steam;
 using LeBot.Infrastructure.MediaExtraction.Threads;
 using LeBot.Infrastructure.MediaExtraction.ThreadsEmbed;
 using LeBot.Infrastructure.MediaExtraction.YtDlp;
@@ -38,6 +39,7 @@ public static class DependencyInjection
         services.Configure<ThreadsOptions>(configuration.GetSection(ThreadsOptions.SectionName));
         services.Configure<MediaCacheOptions>(configuration.GetSection(MediaCacheOptions.SectionName));
         services.Configure<TelemetryOptions>(configuration.GetSection(TelemetryOptions.SectionName));
+        services.Configure<SteamOptions>(configuration.GetSection(SteamOptions.SectionName));
 
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IHostAccountInfo, HostAccountInfo>();
@@ -105,6 +107,11 @@ public static class DependencyInjection
         // auto.ria isn't in yt-dlp's site list; this extractor reposts an advert's photo gallery with
         // a spec caption. It claims only auto.ria advert URLs, so ordering ahead of yt-dlp is harmless.
         services.AddSingleton<IPlatformExtractor, AutoRiaExtractor>();
+        // yt-dlp claims Steam store pages too, but posts every trailer at full size and no price.
+        // This extractor claims only app pages, so ordering ahead of yt-dlp is harmless; the trailer
+        // itself still goes through yt-dlp, which merges its DASH streams.
+        services.AddSingleton<ISteamTrailerDownloader, YtDlpSteamTrailerDownloader>();
+        services.AddSingleton<IPlatformExtractor, SteamStoreExtractor>();
         services.AddSingleton<IPlatformExtractor, YtDlpPlatformExtractor>();
 
         services.AddSingleton<IReleaseSource, GitHubReleaseSource>();
