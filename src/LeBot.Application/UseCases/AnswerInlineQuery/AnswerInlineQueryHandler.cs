@@ -15,8 +15,13 @@ public sealed class AnswerInlineQueryHandler(
     TimeProvider timeProvider,
     ILogger<AnswerInlineQueryHandler> logger)
 {
-    /// <summary>How long an answer waits for a preparation — comfortably inside Telegram's patience for inline answers.</summary>
-    public static readonly TimeSpan WaitBudget = TimeSpan.FromSeconds(8);
+    /// <summary>
+    /// How long an answer waits for a preparation before offering the placeholders. Long enough for a link
+    /// already prepared or stored — a database read — to come back as the ready post; short enough that a
+    /// fresh link's placeholders show up as good as at once. They fill themselves in, so waiting longer buys
+    /// nothing but a spinner.
+    /// </summary>
+    public static readonly TimeSpan WaitBudget = TimeSpan.FromSeconds(1);
 
     public async Task HandleAsync(InlineQuery query, CancellationToken cancellationToken)
     {

@@ -20,7 +20,7 @@ Only the first item goes up: Telegram has no inline albums. A multi-photo post o
 
 ### Wait a little, then let the work finish in the background
 
-An answer waits up to 8 seconds for the preparation. If it isn't done, the user is offered "⏳ Not ready yet — send the link instead", and the preparation keeps running on its own clock (3-minute cap). The next keystroke's query then finds it done. Concurrent queries for one link share a single preparation.
+An answer waits about a second for the preparation — enough for a prepared or stored link to come back as the ready post. If it isn't done, the user is offered the placeholders below at once (this was first 8 seconds and a "send the link instead" notice; the placeholders made the wait pointless), and the preparation keeps running on its own clock (3-minute cap). Concurrent queries for one link share a single preparation.
 
 "Not ready" and "failed" answers both send the bare link, so choosing them never posts something odd — and in a chat where the bot lives, the link still gets reposted. Those answers are uncached by Telegram; ready answers may be cached for five minutes.
 
@@ -30,7 +30,7 @@ An answer waits up to 8 seconds for the preparation. If it isn't done, the user 
 
 ### Off the poll loop
 
-The dispatcher handles updates one at a time. An inline answer that may wait 8 seconds runs detached, as its own error boundary, so it never stalls a group's reposts.
+The dispatcher handles updates one at a time. An inline answer that waits on a preparation runs detached, as its own error boundary, so it never stalls a group's reposts.
 
 ### Open to everyone
 
