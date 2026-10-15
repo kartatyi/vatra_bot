@@ -39,7 +39,7 @@ internal static class InlineResults
     public static (IReadOnlyList<InlineQueryResult> Results, int CacheSeconds) For(InlineAnswer answer, BotLanguage lang = BotLanguage.En) => answer switch
     {
         InlineAnswer.Ready { Post.HasMedia: true } ready => (MediaResults(ready.Post, ready.Url, lang), 0),
-        InlineAnswer.Ready ready => (TextResults(ready.Post, lang), 300),
+        InlineAnswer.Ready ready => (TextResults(ready.Post, ready.Url, lang), 300),
         InlineAnswer.NotReady notReady => (PendingResults(notReady.Url, lang), 0),
         InlineAnswer.Failed failed => ([LinkArticle("failed", FailedTitle(lang), failed.Url)], 0),
         _ => ([], 0),
@@ -103,9 +103,16 @@ internal static class InlineResults
         return results;
     }
 
-    private static List<InlineQueryResult> TextResults(PreparedPost post, BotLanguage lang) =>
+    private static List<InlineQueryResult> TextResults(PreparedPost post, Uri url, BotLanguage lang) =>
         post.Body is { } body
-            ? [new InlineQueryResultArticle("text", lang.Pick("📝 Текст", "📝 Text"), new InputTextMessageContent(Fit(body, TextLimit))) { Description = Preview(body) }]
+            ?
+            [
+                new InlineQueryResultArticle("text", lang.Pick("📝 Текст", "📝 Text"), new InputTextMessageContent(Fit(body, TextLimit)))
+                {
+                    Description = Preview(body),
+                    ReplyMarkup = OriginalLink(url, lang),
+                },
+            ]
             : [];
 
     private static InputTextMessageContent Loading(Uri url, BotLanguage lang) => new($"{LoadingText(lang)}\n{url.AbsoluteUri}");
