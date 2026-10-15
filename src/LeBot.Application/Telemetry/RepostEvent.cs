@@ -17,6 +17,12 @@ namespace LeBot.Application.Telemetry;
 /// <param name="MediaBytes">Total bytes of the sent media when known; null when the extractor didn't report sizes.</param>
 /// <param name="ElapsedMs">Wall-clock milliseconds spent on this URL up to the terminal state.</param>
 /// <param name="BotVersion">The running build's version, so a regression can be tied to the release that introduced it.</param>
+/// <param name="SenderId">
+/// Telegram user id of whoever posted the link — recorded for reposts only, and only for a human sender
+/// (null for bots, anonymous admins, channel posts, and every row written before this column existed).
+/// What the per-chat <c>/leaders</c> ranking counts. A raw id, not a pseudonym: the ranking has to ask
+/// Telegram for the person's current name. Names themselves are never stored.
+/// </param>
 /// <param name="ChatHash">A stable pseudonym of the chat id (not the raw id) so the dashboard can count distinct chats and split stats per chat; see <see cref="ChatHasher"/> for its privacy limits.</param>
 public sealed record RepostEvent(
     DateTimeOffset OccurredAt,
@@ -30,4 +36,5 @@ public sealed record RepostEvent(
     long? MediaBytes,
     long ElapsedMs,
     string BotVersion,
-    string ChatHash);
+    string ChatHash,
+    long? SenderId = null);

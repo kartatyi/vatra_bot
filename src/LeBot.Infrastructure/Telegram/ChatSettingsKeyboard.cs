@@ -1,0 +1,107 @@
+using LeBot.Domain.Settings;
+using Telegram.Bot.Types.ReplyMarkups;
+
+namespace LeBot.Infrastructure.Telegram;
+
+/// <summary>
+/// The <c>/settings</c> message: its text, its inline keyboard, and the callback data the keyboard sends
+/// back. One row per setting, one button per choice, the current choice ticked. Pure, so the round trip
+/// from button to <see cref="ChatSettings"/> is testable without Telegram.
+/// </summary>
+internal static class ChatSettingsKeyboard
+{
+    private const string Prefix = "cfg:";
+    private const string VideoKey = "v";
+    private const string PostKey = "p";
+    private const string ButtonKey = "b";
+    private const string On = "On";
+    private const string Off = "Off";
+    private const string Tick = "✅ ";
+
+    public const string Text =
+        "⚙️ Settings for this chat\n\n" +
+        "🎬 Video — the text under TikToks, Reels, Shorts\n" +
+        "📝 Post — the text of Threads, X, Reddit and photo posts\n" +
+        "🔘 Button — a «" + RevealButton.Label + "» button under a repost whose text was hidden or cut\n\n" +
+        "Off: media only · Brief: no hashtags, a few lines · Full: as posted\n" +
+        "Only group admins can change these.";
+
+    public const string AdminsOnly = "Only group admins can change these settings.";
+
+    public const string Saved = "Saved ✓";
+
+    /// <summary>The keyboard for <paramref name="settings"/>, with the active choice of each row ticked.</summary>
+    public static InlineKeyboardMarkup Markup(ChatSettings settings) => new(
+    [
+        [
+            ModeButton("🎬 Off", VideoKey, CaptionMode.Off, settings.VideoCaption),
+            ModeButton("🎬 Brief", VideoKey, CaptionMode.Brief, settings.VideoCaption),
+            ModeButton("🎬 Full", VideoKey, CaptionMode.Full, settings.VideoCaption),
+        ],
+        [
+            ModeButton("📝 Brief", PostKey, CaptionMode.Brief, settings.PostCaption),
+            ModeButton("📝 Full", PostKey, CaptionMode.Full, settings.PostCaption),
+        ],
+        [
+            Button("🔘 Button on", ButtonKey, On, settings.OfferFullText),
+            Button("🔘 Button off", ButtonKey, Off, !settings.OfferFullText),
+        ],
+    ]);
+
+    /// <summary>
+    /// Applies the button behind <paramref name="callbackData"/> to <paramref name="current"/>. False for
+    /// anything this keyboard didn't send — another feature's button, or a forged payload such as
+    /// "post: off", which <see cref="ChatSettings"/> would refuse.
+    /// </summary>
+    public static bool TryApply(string? callbackData, ChatSettings current, out ChatSettings updated)
+    {
+        updated = current;
+        if (callbackData is null || !callbackData.StartsWith(Prefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var parts = callbackData[Prefix.Length..].Split(':');
+        if (parts.Length != 2)
+        {
+            return false;
+        }
+
+        var (key, value) = (parts[0], parts[1]);
+        if (key == ButtonKey)
+        {
+            if (value is not (On or Off))
+            {
+                return false;
+            }
+
+            updated = current with { OfferFullText = value == On };
+            return true;
+        }
+
+        // Only the exact names the keyboard emits — Enum.TryParse alone would also take "7" or " Full".
+        if (!Enum.TryParse<CaptionMode>(value, ignoreCase: false, out var mode) || !Enum.IsDefined(mode) ||
+            value != mode.ToString())
+        {
+            return false;
+        }
+
+        switch (key)
+        {
+            case VideoKey:
+                updated = current with { VideoCaption = mode };
+                return true;
+            case PostKey when mode != CaptionMode.Off:
+                updated = new ChatSettings(current.VideoCaption, mode, current.OfferFullText);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static InlineKeyboardButton ModeButton(string label, string key, CaptionMode mode, CaptionMode active) =>
+        Button(label, key, mode.ToString(), mode == active);
+
+    private static InlineKeyboardButton Button(string label, string key, string value, bool active) =>
+        InlineKeyboardButton.WithCallbackData(active ? Tick + label : label, $"{Prefix}{key}:{value}");
+}

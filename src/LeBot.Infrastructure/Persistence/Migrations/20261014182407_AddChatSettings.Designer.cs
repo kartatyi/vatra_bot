@@ -10,8 +10,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace LeBot.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(LeBotDbContext))]
-    [Migration("20261015002221_AddPreparedPosts")]
-    partial class AddPreparedPosts
+    [Migration("20261014182407_AddChatSettings")]
+    partial class AddChatSettings
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -78,27 +78,52 @@ namespace LeBot.Infrastructure.Persistence.Migrations
                     b.ToTable("RepostEvents", (string)null);
                 });
 
-            modelBuilder.Entity("LeBot.Infrastructure.Persistence.PreparedPostRow", b =>
+            modelBuilder.Entity("LeBot.Infrastructure.Persistence.ChatSettingsRow", b =>
                 {
-                    b.Property<string>("LinkKey")
+                    b.Property<string>("ChatHash")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("Body")
-                        .HasColumnType("TEXT");
+                    b.Property<bool>("OfferFullText")
+                        .HasColumnType("INTEGER");
 
-                    b.Property<string>("FileId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Kind")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("PreparedAt")
+                    b.Property<string>("PostCaption")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.HasKey("LinkKey");
+                    b.Property<string>("UpdatedAt")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
 
-                    b.ToTable("PreparedPosts", (string)null);
+                    b.Property<string>("VideoCaption")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("ChatHash");
+
+                    b.ToTable("ChatSettings", (string)null);
+                });
+
+            modelBuilder.Entity("LeBot.Infrastructure.Persistence.RevealableTextRow", b =>
+                {
+                    b.Property<string>("ChatHash")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("MessageId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CreatedAt")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("ChatHash", "MessageId");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.ToTable("RevealableTexts", (string)null);
                 });
 #pragma warning restore 612, 618
         }

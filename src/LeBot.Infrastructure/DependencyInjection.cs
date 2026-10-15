@@ -63,6 +63,10 @@ public static class DependencyInjection
         services.AddSingleton<IPreparedPostStore, SqlitePreparedPostStore>();
         services.AddSingleton<IInlineMediaUploader, TelegramInlineMediaUploader>();
         services.AddSingleton<IInlineAnswerer, TelegramInlineAnswerer>();
+        services.AddSingleton<ISeenLinkStore, SqliteSeenLinkStore>();
+        services.AddSingleton<IStatsOptOutStore, SqliteStatsOptOutStore>();
+        services.AddSingleton<IChatSettingsStore, SqliteChatSettingsStore>();
+        services.AddSingleton<IRevealableTextStore, SqliteRevealableTextStore>();
 
         services.AddSingleton<ITelegramBotClient>(sp =>
         {

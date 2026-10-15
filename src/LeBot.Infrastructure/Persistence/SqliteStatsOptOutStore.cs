@@ -1,0 +1,30 @@
+using LeBot.Application.Telemetry;
+using Microsoft.EntityFrameworkCore;
+
+namespace LeBot.Infrastructure.Persistence;
+
+/// <summary>SQLite-backed <see cref="IStatsOptOutStore"/>; the rows are read by <see cref="SqliteRepostEventStore.GetSenderHostCountsAsync"/>.</summary>
+internal sealed class SqliteStatsOptOutStore(IDbContextFactory<LeBotDbContext> contextFactory) : IStatsOptOutStore
+{
+    public async Task SetOptedOutAsync(long chatId, long userId, bool optedOut, CancellationToken cancellationToken)
+    {
+        var chatHash = ChatHasher.Of(chatId);
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var existing = await db.StatsOptOuts
+            .FirstOrDefaultAsync(o => o.ChatHash == chatHash && o.UserId == userId, cancellationToken);
+
+        switch (optedOut, existing)
+        {
+            case (true, null):
+                db.StatsOptOuts.Add(new StatsOptOutRow { ChatHash = chatHash, UserId = userId });
+                break;
+            case (false, { } row):
+                db.StatsOptOuts.Remove(row);
+                break;
+            default:
+                return; // already in the requested state
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+    }
+}

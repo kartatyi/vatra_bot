@@ -50,4 +50,11 @@ public sealed record MediaPayload(
             };
         }
     }
+
+    /// <summary>
+    /// The full <see cref="Body"/> a chat's caption settings held back from this repost, set by
+    /// <see cref="Settings.ChatSettings.ShapeCaption"/>. Non-null means the repost offers a button that
+    /// shows it.
+    /// </summary>
+    public string? RevealableText { get; init; }
 }
