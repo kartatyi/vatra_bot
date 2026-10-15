@@ -5,6 +5,7 @@ using LeBot.Application.Telemetry;
 using LeBot.Application.UseCases.HandleIncomingMessage;
 using LeBot.Domain.Common;
 using LeBot.Domain.Media;
+using LeBot.Domain.Settings;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -16,13 +17,21 @@ public class HandleIncomingMessageHandlerTests
     private readonly IPlatformExtractor _extractor = Substitute.For<IPlatformExtractor>();
     private readonly IMediaCache _cache = Substitute.For<IMediaCache>();
     private readonly ITelegramMessenger _messenger = Substitute.For<ITelegramMessenger>();
+    private readonly IChatSettingsStore _settings = Substitute.For<IChatSettingsStore>();
+    private readonly IRevealableTextStore _revealable = Substitute.For<IRevealableTextStore>();
     private readonly RepostMetrics _metrics = new(TimeProvider.System);
     private readonly IRepostJournal _journal = Substitute.For<IRepostJournal>();
     private readonly TimeProvider _time = TimeProvider.System;
     private readonly ILogger<HandleIncomingMessageHandler> _logger = NullLogger<HandleIncomingMessageHandler>.Instance;
 
+    // Full/Full shapes nothing, so the tests that aren't about captions can assert on the payload
+    // the extractor returned; the caption tests below set their own settings.
+    public HandleIncomingMessageHandlerTests() =>
+        _settings.GetAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(new ChatSettings(CaptionMode.Full, CaptionMode.Full));
+
     private HandleIncomingMessageHandler CreateSut() =>
-        new(_urlExtractor, [_extractor], _cache, _messenger, _metrics, _journal, _time, _logger);
+        new(_urlExtractor, [_extractor], _cache, _settings, _revealable, _messenger, _metrics, _journal, _time, _logger);
 
     private static IncomingMessage Message(string text = "hi") =>
         new(ChatId: 123L, MessageId: 7, Text: text, SenderUsername: "user", SenderId: 555L);
@@ -99,6 +108,90 @@ public class HandleIncomingMessageHandlerTests
 
         await _messenger.Received(1).ReplyWithMediaAsync(
             123L, 7, payload, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleAsync_VideoUnderDefaultSettings_RepostsWithoutCaption_CachesFullText()
+    {
+        var url = new Uri("https://www.tiktok.com/@user/video/1");
+        var item = new MediaItem("/tmp/x.mp4", MediaKind.Video, "video/mp4", 100, 5);
+        var payload = new MediaPayload(url, "Video by user", "user", [item], "promo #fyp");
+        _settings.GetAsync(123L, Arg.Any<CancellationToken>()).Returns(ChatSettings.Default);
+
+        _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
+        _extractor.CanHandle(url).Returns(true);
+        _extractor.ExtractAsync(url, Arg.Any<CancellationToken>())
+            .Returns(Result<MediaPayload, ExtractionError>.Success(payload));
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        await _messenger.Received(1).ReplyWithMediaAsync(
+            123L, 7,
+            payload with { Title = null, Description = null, Author = null, RevealableText = payload.Body },
+            Arg.Any<CancellationToken>());
+        await _cache.Received(1).SaveAsync(payload, Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleAsync_HiddenText_IsKeptForTheRepostsButton()
+    {
+        var url = new Uri("https://www.tiktok.com/@user/video/1");
+        var item = new MediaItem("/tmp/x.mp4", MediaKind.Video, "video/mp4", 100, 5);
+        var payload = new MediaPayload(url, null, "user", [item], "the recipe");
+        _settings.GetAsync(123L, Arg.Any<CancellationToken>()).Returns(ChatSettings.Default);
+        _messenger.ReplyWithMediaAsync(123L, 7, Arg.Any<MediaPayload>(), Arg.Any<CancellationToken>()).Returns(42);
+
+        _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
+        _extractor.CanHandle(url).Returns(true);
+        _extractor.ExtractAsync(url, Arg.Any<CancellationToken>())
+            .Returns(Result<MediaPayload, ExtractionError>.Success(payload));
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        await _revealable.Received(1).SaveAsync(123L, 42, "the recipe\n\n— user", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleAsync_HiddenTextOnAnAlbum_KeepsNothing()
+    {
+        var url = new Uri("https://www.tiktok.com/@user/video/1");
+        var items = new[]
+        {
+            new MediaItem("/tmp/1.mp4", MediaKind.Video, "video/mp4", 100, 5),
+            new MediaItem("/tmp/2.mp4", MediaKind.Video, "video/mp4", 100, 5),
+        };
+        var payload = new MediaPayload(url, null, "user", items, "the recipe");
+        _settings.GetAsync(123L, Arg.Any<CancellationToken>()).Returns(ChatSettings.Default);
+        _messenger.ReplyWithMediaAsync(123L, 7, Arg.Any<MediaPayload>(), Arg.Any<CancellationToken>()).Returns((int?)null);
+
+        _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
+        _extractor.CanHandle(url).Returns(true);
+        _extractor.ExtractAsync(url, Arg.Any<CancellationToken>())
+            .Returns(Result<MediaPayload, ExtractionError>.Success(payload));
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        await _revealable.DidNotReceiveWithAnyArgs().SaveAsync(default, default, default!, default);
+    }
+
+    [Fact]
+    public async Task HandleAsync_CacheHit_ShapesStoredPayloadForThisChat()
+    {
+        var url = new Uri("https://www.tiktok.com/@user/video/1");
+        var item = new MediaItem("/cache/ab/00.mp4", MediaKind.Video, "video/mp4", 100, 5);
+        var stored = new MediaPayload(url, null, "user", [item], "Nice clip #fyp", RetainFiles: true);
+        _settings.GetAsync(123L, Arg.Any<CancellationToken>())
+            .Returns(new ChatSettings(CaptionMode.Brief, CaptionMode.Full));
+
+        _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
+        _extractor.CanHandle(url).Returns(true);
+        _cache.TryGetAsync(url, Arg.Any<CancellationToken>())
+            .Returns(new CachedRepost(stored, "YtDlpPlatformExtractor"));
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        await _messenger.Received(1).ReplyWithMediaAsync(
+            123L, 7, stored with { Description = "Nice clip", RevealableText = stored.Body }, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -211,7 +304,7 @@ public class HandleIncomingMessageHandlerTests
 
         _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
 
-        var sut = new HandleIncomingMessageHandler(_urlExtractor, [first, second], _cache, _messenger, _metrics, _journal, _time, _logger);
+        var sut = new HandleIncomingMessageHandler(_urlExtractor, [first, second], _cache, _settings, _revealable, _messenger, _metrics, _journal, _time, _logger);
         await sut.HandleAsync(Message(), CancellationToken.None);
 
         await _messenger.Received(1).ReplyWithMediaAsync(123L, 7, goodPayload, Arg.Any<CancellationToken>());
@@ -237,7 +330,7 @@ public class HandleIncomingMessageHandlerTests
 
         _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
 
-        var sut = new HandleIncomingMessageHandler(_urlExtractor, [first, second], _cache, _messenger, _metrics, _journal, _time, _logger);
+        var sut = new HandleIncomingMessageHandler(_urlExtractor, [first, second], _cache, _settings, _revealable, _messenger, _metrics, _journal, _time, _logger);
         await sut.HandleAsync(Message(), CancellationToken.None);
 
         // Both ran (no media wins, so chain keeps going); first text wins as primary fallback.

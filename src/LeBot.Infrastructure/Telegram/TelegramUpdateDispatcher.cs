@@ -1,5 +1,6 @@
 using System.Globalization;
 using LeBot.Application.Metrics;
+using LeBot.Application.Ports;
 using LeBot.Application.Telemetry;
 using LeBot.Application.UseCases.HandleIncomingMessage;
 using LeBot.Infrastructure.Configuration;
@@ -11,6 +12,7 @@ using Telegram.Bot;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
+using Telegram.Bot.Types.ReplyMarkups;
 
 namespace LeBot.Infrastructure.Telegram;
 
@@ -25,6 +27,9 @@ public sealed class TelegramUpdateDispatcher(
     RepostMetrics metrics,
     IRepostEventStore eventStore,
     IStatsOptOutStore optOuts,
+    IChatSettingsStore settingsStore,
+    IRevealableTextStore revealableTexts,
+    IAppVersion appVersion,
     BotHealthSignal health,
     IOptions<TelegramOptions> options,
     TimeProvider timeProvider,
@@ -71,7 +76,7 @@ public sealed class TelegramUpdateDispatcher(
                     offset: offset,
                     limit: 100,
                     timeout: _options.PollingTimeoutSeconds,
-                    allowedUpdates: [UpdateType.Message],
+                    allowedUpdates: [UpdateType.Message, UpdateType.CallbackQuery],
                     cancellationToken: stoppingToken);
 
                 if (!announcedServing)
@@ -114,13 +119,19 @@ public sealed class TelegramUpdateDispatcher(
             ["CorrelationId"] = update.Id,
         });
 
-        if (update.Message is not { Text: { Length: > 0 } text } message)
-        {
-            return;
-        }
-
         try
         {
+            if (update.CallbackQuery is { } callback)
+            {
+                await HandleCallbackAsync(callback, cancellationToken);
+                return;
+            }
+
+            if (update.Message is not { Text: { Length: > 0 } text } message)
+            {
+                return;
+            }
+
             if (text.StartsWith('/'))
             {
                 if (await TryHandleCommandAsync(message, text, cancellationToken))
@@ -160,14 +171,17 @@ public sealed class TelegramUpdateDispatcher(
         switch (command.ToLowerInvariant())
         {
             case "ping":
-            case "start":
                 await ReplyAsync(message, "🟢 OK", cancellationToken);
+                return true;
+            case "start":
+            case "help":
+                await ReplyAsync(message, await BuildHelpAsync(message.From?.LanguageCode, cancellationToken), cancellationToken);
                 return true;
             case "stats":
                 await ReplyAsync(message, await BuildStatsAsync(cancellationToken), cancellationToken);
                 return true;
             case "failures":
-                await ReplyAsync(message, await BuildFailuresAsync(argument, cancellationToken), cancellationToken);
+                await ReplyAsync(message, await BuildFailuresAsync(message.Chat.Id, argument, cancellationToken), cancellationToken);
                 return true;
             case "top":
                 await ReplyAsync(message, await BuildTopAsync(cancellationToken), cancellationToken);
@@ -175,17 +189,137 @@ public sealed class TelegramUpdateDispatcher(
             case "leaders":
                 await ReplyAsync(message, await BuildLeadersAsync(message, argument, cancellationToken), cancellationToken);
                 return true;
+            case "settings":
+                var settings = await settingsStore.GetAsync(message.Chat.Id, cancellationToken);
+                await ReplyAsync(message, ChatSettingsKeyboard.Text, cancellationToken, ChatSettingsKeyboard.Markup(settings));
+                return true;
             default:
                 return false;
         }
     }
 
-    private Task<Message> ReplyAsync(Message original, string text, CancellationToken cancellationToken) =>
+    private Task<Message> ReplyAsync(
+        Message original,
+        string text,
+        CancellationToken cancellationToken,
+        InlineKeyboardMarkup? keyboard = null) =>
         bot.SendMessage(
             chatId: original.Chat.Id,
             text: text,
             replyParameters: new ReplyParameters { MessageId = original.MessageId },
+            replyMarkup: keyboard,
             cancellationToken: cancellationToken);
+
+    /// <summary>
+    /// A press on one of the bot's inline buttons: a repost's "show text", or a <c>/settings</c> choice.
+    /// Every press gets an answer — Telegram keeps the button spinning until it does — but only a group
+    /// admin's press changes settings.
+    /// </summary>
+    private async Task HandleCallbackAsync(CallbackQuery callback, CancellationToken cancellationToken)
+    {
+        if (callback.Message is not { } origin)
+        {
+            await bot.AnswerCallbackQuery(callback.Id, cancellationToken: cancellationToken);
+            return;
+        }
+
+        if (callback.Data == RevealButton.CallbackData)
+        {
+            await RevealAsync(callback, origin, cancellationToken);
+            return;
+        }
+
+        var current = await settingsStore.GetAsync(origin.Chat.Id, cancellationToken);
+        if (!ChatSettingsKeyboard.TryApply(callback.Data, current, out var updated))
+        {
+            await bot.AnswerCallbackQuery(callback.Id, cancellationToken: cancellationToken);
+            return;
+        }
+
+        if (!await IsChatAdminAsync(origin.Chat, callback.From.Id, cancellationToken))
+        {
+            await bot.AnswerCallbackQuery(
+                callback.Id, ChatSettingsKeyboard.AdminsOnly, showAlert: true, cancellationToken: cancellationToken);
+            return;
+        }
+
+        if (updated != current)
+        {
+            await settingsStore.SaveAsync(origin.Chat.Id, updated, cancellationToken);
+            await bot.EditMessageReplyMarkup(
+                origin.Chat.Id, origin.MessageId, ChatSettingsKeyboard.Markup(updated), cancellationToken: cancellationToken);
+            logger.LogInformation(
+                "Chat {ChatId} settings changed: video {VideoCaption}, post {PostCaption}",
+                origin.Chat.Id, updated.VideoCaption, updated.PostCaption);
+        }
+
+        await bot.AnswerCallbackQuery(callback.Id, ChatSettingsKeyboard.Saved, cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// Swaps a repost's held-back text into the repost itself. Anyone in the chat may press it — it only
+    /// shows what the post already said. Editing without a keyboard also removes the button.
+    /// </summary>
+    private async Task RevealAsync(CallbackQuery callback, Message origin, CancellationToken cancellationToken)
+    {
+        var text = await revealableTexts.TakeAsync(origin.Chat.Id, origin.MessageId, cancellationToken);
+        if (text is null)
+        {
+            await bot.AnswerCallbackQuery(callback.Id, RevealButton.Gone, cancellationToken: cancellationToken);
+            return;
+        }
+
+        // A text reply keeps its body in Text, a media reply in its caption — and their limits differ.
+        if (origin.Text is not null)
+        {
+            await bot.EditMessageText(
+                origin.Chat.Id,
+                origin.MessageId,
+                TelegramBotMessenger.Fit(text, TelegramBotMessenger.MaxTextLength)!, // non-null in, non-null out
+                cancellationToken: cancellationToken);
+        }
+        else
+        {
+            await bot.EditMessageCaption(
+                origin.Chat.Id,
+                origin.MessageId,
+                TelegramBotMessenger.Fit(text, TelegramBotMessenger.MaxCaptionLength),
+                cancellationToken: cancellationToken);
+        }
+
+        await bot.AnswerCallbackQuery(callback.Id, cancellationToken: cancellationToken);
+    }
+
+    /// <summary>In a private chat the user owns the chat; in a group only its creator and admins count.</summary>
+    private async Task<bool> IsChatAdminAsync(Chat chat, long userId, CancellationToken cancellationToken)
+    {
+        if (chat.Type == ChatType.Private)
+        {
+            return true;
+        }
+
+        var member = await bot.GetChatMember(chat.Id, userId, cancellationToken);
+        return member.Status is ChatMemberStatus.Administrator or ChatMemberStatus.Creator;
+    }
+
+    private async Task<string> BuildHelpAsync(string? languageCode, CancellationToken cancellationToken)
+    {
+        // Telegram answers a language with no dedicated copy with an empty one rather than the default,
+        // so fall back by hand: the asker's language first, then the language-less default.
+        var description = (await bot.GetMyDescription(languageCode, cancellationToken)).Description;
+        if (string.IsNullOrWhiteSpace(description) && languageCode is not null)
+        {
+            description = (await bot.GetMyDescription(cancellationToken: cancellationToken)).Description;
+        }
+
+        var commands = await bot.GetMyCommands(languageCode: languageCode, cancellationToken: cancellationToken);
+        if (commands.Length == 0 && languageCode is not null)
+        {
+            commands = await bot.GetMyCommands(cancellationToken: cancellationToken);
+        }
+
+        return HelpReportFormatter.Help(description, commands, appVersion.Current);
+    }
 
     private async Task<string> BuildStatsAsync(CancellationToken cancellationToken)
     {
@@ -194,10 +328,13 @@ public sealed class TelegramUpdateDispatcher(
         return DashboardReportFormatter.Stats(metrics, uptime, allTime);
     }
 
-    private async Task<string> BuildFailuresAsync(string? argument, CancellationToken cancellationToken)
+    private async Task<string> BuildFailuresAsync(long chatId, string? argument, CancellationToken cancellationToken)
     {
         var limit = ParseListSize(argument);
-        var failures = await eventStore.GetRecentFailuresAsync(limit, cancellationToken);
+
+        // Scoped to the asking chat: a failure row carries the full URL someone posted, and one group
+        // has no business reading another's.
+        var failures = await eventStore.GetRecentFailuresAsync(limit, ChatHasher.Of(chatId), cancellationToken);
         return DashboardReportFormatter.Failures(failures, timeProvider.GetUtcNow());
     }
 

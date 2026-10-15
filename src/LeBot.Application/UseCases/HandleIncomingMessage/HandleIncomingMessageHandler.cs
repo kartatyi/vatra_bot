@@ -3,6 +3,7 @@ using LeBot.Application.Ports;
 using LeBot.Application.Telemetry;
 using LeBot.Domain.Common;
 using LeBot.Domain.Media;
+using LeBot.Domain.Settings;
 using Microsoft.Extensions.Logging;
 
 namespace LeBot.Application.UseCases.HandleIncomingMessage;
@@ -16,6 +17,8 @@ public sealed class HandleIncomingMessageHandler(
     IUrlExtractor urlExtractor,
     IEnumerable<IPlatformExtractor> extractors,
     IMediaCache cache,
+    IChatSettingsStore settingsStore,
+    IRevealableTextStore revealableTexts,
     ITelegramMessenger messenger,
     RepostMetrics metrics,
     IRepostJournal journal,
@@ -38,14 +41,15 @@ public sealed class HandleIncomingMessageHandler(
             return;
         }
 
+        var settings = await settingsStore.GetAsync(message.ChatId, cancellationToken);
         foreach (var url in urls)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await ProcessUrlAsync(message, url, cancellationToken);
+            await ProcessUrlAsync(message, url, settings, cancellationToken);
         }
     }
 
-    private async Task ProcessUrlAsync(IncomingMessage message, Uri url, CancellationToken cancellationToken)
+    private async Task ProcessUrlAsync(IncomingMessage message, Uri url, ChatSettings settings, CancellationToken cancellationToken)
     {
         var candidates = extractors.Where(e => e.CanHandle(url)).ToList();
         if (candidates.Count == 0)
@@ -66,7 +70,7 @@ public sealed class HandleIncomingMessageHandler(
 
         // Ask the cache before any extractor runs: a link the chat has already seen is answered
         // from disk without a single request to the platform.
-        if (await TryServeFromCacheAsync(message, url, startedAt, cancellationToken))
+        if (await TryServeFromCacheAsync(message, url, settings, startedAt, cancellationToken))
         {
             return;
         }
@@ -84,13 +88,10 @@ public sealed class HandleIncomingMessageHandler(
             {
                 case Result<MediaPayload, ExtractionError>.Ok ok when ok.Value.HasMedia:
                     // Cache first: the messenger deletes the files it was handed once the upload
-                    // finishes, so after the send there is nothing left to copy.
+                    // finishes, so after the send there is nothing left to copy. The cache keeps the
+                    // full text; each chat's caption settings shape it on the way out.
                     await cache.SaveAsync(ok.Value, extractorName, cancellationToken);
-                    await messenger.ReplyWithMediaAsync(
-                        message.ChatId,
-                        message.MessageId,
-                        ok.Value,
-                        cancellationToken);
+                    await ReplyWithMediaAsync(message, settings.ShapeCaption(ok.Value), cancellationToken);
                     metrics.RecordMediaRepost(extractorName);
                     await journal.RecordMediaRepostAsync(
                         url, extractorName, ok.Value.Items.Count, TotalBytes(ok.Value),
@@ -136,11 +137,7 @@ public sealed class HandleIncomingMessageHandler(
         if (textFallback is { } fallback)
         {
             await cache.SaveAsync(fallback.Payload, fallback.Extractor, cancellationToken);
-            await messenger.ReplyWithTextAsync(
-                message.ChatId,
-                message.MessageId,
-                fallback.Payload,
-                cancellationToken);
+            await ReplyWithTextAsync(message, settings.ShapeCaption(fallback.Payload), cancellationToken);
             metrics.RecordTextRepost(fallback.Extractor);
             await journal.RecordTextFallbackAsync(
                 url, fallback.Extractor,
@@ -178,6 +175,7 @@ public sealed class HandleIncomingMessageHandler(
     private async Task<bool> TryServeFromCacheAsync(
         IncomingMessage message,
         Uri url,
+        ChatSettings settings,
         long startedAt,
         CancellationToken cancellationToken)
     {
@@ -189,11 +187,7 @@ public sealed class HandleIncomingMessageHandler(
 
         if (cached.Payload.HasMedia)
         {
-            await messenger.ReplyWithMediaAsync(
-                message.ChatId,
-                message.MessageId,
-                cached.Payload,
-                cancellationToken);
+            await ReplyWithMediaAsync(message, settings.ShapeCaption(cached.Payload), cancellationToken);
             metrics.RecordMediaRepost(cached.Extractor);
             await journal.RecordMediaRepostAsync(
                 url, CacheExtractorName, cached.Payload.Items.Count, TotalBytes(cached.Payload),
@@ -201,11 +195,7 @@ public sealed class HandleIncomingMessageHandler(
         }
         else if (HasReplyableText(cached.Payload))
         {
-            await messenger.ReplyWithTextAsync(
-                message.ChatId,
-                message.MessageId,
-                cached.Payload,
-                cancellationToken);
+            await ReplyWithTextAsync(message, settings.ShapeCaption(cached.Payload), cancellationToken);
             metrics.RecordTextRepost(cached.Extractor);
             await journal.RecordTextFallbackAsync(
                 url, CacheExtractorName,
@@ -222,6 +212,27 @@ public sealed class HandleIncomingMessageHandler(
             url, cached.Extractor, message.ChatId);
         return true;
     }
+
+    private async Task ReplyWithMediaAsync(IncomingMessage message, MediaPayload shaped, CancellationToken cancellationToken)
+    {
+        var sentId = await messenger.ReplyWithMediaAsync(message.ChatId, message.MessageId, shaped, cancellationToken);
+        await RememberRevealableTextAsync(message.ChatId, sentId, shaped, cancellationToken);
+    }
+
+    private async Task ReplyWithTextAsync(IncomingMessage message, MediaPayload shaped, CancellationToken cancellationToken)
+    {
+        var sentId = await messenger.ReplyWithTextAsync(message.ChatId, message.MessageId, shaped, cancellationToken);
+        await RememberRevealableTextAsync(message.ChatId, sentId, shaped, cancellationToken);
+    }
+
+    /// <summary>
+    /// Keeps the text the caption settings held back, so the repost's "show text" button has something
+    /// to show. Only a repost that went out as one message carries the button, hence the id check.
+    /// </summary>
+    private Task RememberRevealableTextAsync(long chatId, int? sentId, MediaPayload shaped, CancellationToken cancellationToken) =>
+        shaped.RevealableText is { } text && sentId is { } messageId
+            ? revealableTexts.SaveAsync(chatId, messageId, text, cancellationToken)
+            : Task.CompletedTask;
 
     private static bool HasReplyableText(MediaPayload payload)
     {

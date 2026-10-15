@@ -7,6 +7,7 @@ using Telegram.Bot;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
+using Telegram.Bot.Types.ReplyMarkups;
 
 namespace LeBot.Infrastructure.Telegram;
 
@@ -23,8 +24,8 @@ public sealed class TelegramBotMessenger(
     : ITelegramMessenger
 {
     // Telegram caps captions on media messages at 1024 chars; standalone text messages at 4096.
-    private const int MaxCaptionLength = 1024;
-    private const int MaxTextLength = 4096;
+    internal const int MaxCaptionLength = 1024;
+    internal const int MaxTextLength = 4096;
 
     // Telegram media groups must contain 2-10 items.
     private const int MaxAlbumSize = 10;
@@ -50,7 +51,7 @@ public sealed class TelegramBotMessenger(
         })
         .Build();
 
-    public async Task ReplyWithMediaAsync(
+    public async Task<int?> ReplyWithMediaAsync(
         long chatId,
         int replyToMessageId,
         MediaPayload payload,
@@ -58,7 +59,7 @@ public sealed class TelegramBotMessenger(
     {
         if (payload.Items.Count == 0)
         {
-            return;
+            return null;
         }
 
         var caption = BuildBody(payload, MaxCaptionLength);
@@ -66,15 +67,15 @@ public sealed class TelegramBotMessenger(
 
         if (payload.Items.Count == 1)
         {
-            await SendSingleAsync(chatId, reply, payload.Items[0], caption, payload, cancellationToken);
+            return await SendSingleAsync(chatId, reply, payload.Items[0], caption, payload, cancellationToken);
         }
-        else
-        {
-            await SendAlbumAsync(chatId, reply, payload.Items, caption, payload, cancellationToken);
-        }
+
+        // sendMediaGroup takes no reply_markup, so an album can't carry the reveal button.
+        await SendAlbumAsync(chatId, reply, payload.Items, caption, payload, cancellationToken);
+        return null;
     }
 
-    public async Task ReplyWithTextAsync(
+    public async Task<int?> ReplyWithTextAsync(
         long chatId,
         int replyToMessageId,
         MediaPayload payload,
@@ -83,14 +84,16 @@ public sealed class TelegramBotMessenger(
         var body = BuildBody(payload, MaxTextLength);
         if (string.IsNullOrEmpty(body))
         {
-            return;
+            return null;
         }
 
-        await SendWithRetryAsync(ct => bot.SendMessage(
+        var sent = await SendWithRetryAsync(ct => bot.SendMessage(
             chatId: chatId,
             text: body,
             replyParameters: new ReplyParameters { MessageId = replyToMessageId },
+            replyMarkup: RevealButton.For(payload),
             cancellationToken: ct), cancellationToken);
+        return sent.MessageId;
     }
 
     public async Task SendTextAsync(long chatId, string text, CancellationToken cancellationToken)
@@ -119,7 +122,7 @@ public sealed class TelegramBotMessenger(
         return new TelegramBusyIndicator(bot, chatId, action, logger);
     }
 
-    private async Task SendSingleAsync(
+    private async Task<int?> SendSingleAsync(
         long chatId,
         ReplyParameters reply,
         MediaItem item,
@@ -129,7 +132,8 @@ public sealed class TelegramBotMessenger(
     {
         try
         {
-            await SendItemAsync(chatId, reply, item, caption, cancellationToken);
+            var sent = await SendItemAsync(chatId, reply, item, caption, RevealButton.For(payload), cancellationToken);
+            return sent.MessageId;
         }
         catch (ApiRequestException ex)
         {
@@ -142,6 +146,7 @@ public sealed class TelegramBotMessenger(
                 text: $"Couldn't repost the media. Source: {payload.SourceUrl}",
                 replyParameters: reply,
                 cancellationToken: ct), cancellationToken);
+            return null;
         }
         finally
         {
@@ -214,11 +219,12 @@ public sealed class TelegramBotMessenger(
         }
     }
 
-    private async Task SendItemAsync(
+    private async Task<Message> SendItemAsync(
         long chatId,
         ReplyParameters reply,
         MediaItem item,
         string? caption,
+        InlineKeyboardMarkup? keyboard,
         CancellationToken cancellationToken)
     {
         await using var stream = File.OpenRead(item.FilePath);
@@ -231,43 +237,49 @@ public sealed class TelegramBotMessenger(
                 // (moov atom up front) and render the inline player with a play button — without
                 // it a non-faststart MP4 falls back to a generic file with a download button.
                 // duration is the one dimension we have; width/height Telegram reads from the bytes.
-                await SendWithRetryAsync(ct => bot.SendVideo(
+                return await SendWithRetryAsync(ct => bot.SendVideo(
                     chatId: chatId,
                     video: inputFile,
                     duration: item.DurationSeconds,
                     caption: caption,
                     supportsStreaming: true,
                     replyParameters: reply,
+                    replyMarkup: keyboard,
                     cancellationToken: ct), cancellationToken);
-                break;
+
             case MediaKind.Photo:
-                await SendWithRetryAsync(ct => bot.SendPhoto(
+                return await SendWithRetryAsync(ct => bot.SendPhoto(
                     chatId: chatId,
                     photo: inputFile,
                     caption: caption,
                     replyParameters: reply,
+                    replyMarkup: keyboard,
                     cancellationToken: ct), cancellationToken);
-                break;
             case MediaKind.Animation:
-                await SendWithRetryAsync(ct => bot.SendAnimation(
+                return await SendWithRetryAsync(ct => bot.SendAnimation(
                     chatId: chatId,
                     animation: inputFile,
                     caption: caption,
                     replyParameters: reply,
+                    replyMarkup: keyboard,
                     cancellationToken: ct), cancellationToken);
-                break;
             case MediaKind.Audio:
-                await SendWithRetryAsync(ct => bot.SendAudio(
+                return await SendWithRetryAsync(ct => bot.SendAudio(
                     chatId: chatId,
                     audio: inputFile,
                     caption: caption,
                     replyParameters: reply,
+                    replyMarkup: keyboard,
                     cancellationToken: ct), cancellationToken);
-                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(item), item.Kind, "Unknown media kind.");
         }
     }
 
     private ValueTask SendWithRetryAsync(Func<CancellationToken, Task> action, CancellationToken cancellationToken) =>
+        _retryPipeline.ExecuteAsync(async token => await action(token), cancellationToken);
+
+    private ValueTask<T> SendWithRetryAsync<T>(Func<CancellationToken, Task<T>> action, CancellationToken cancellationToken) =>
         _retryPipeline.ExecuteAsync(async token => await action(token), cancellationToken);
 
     private static bool IsTransientTelegramError(ApiRequestException ex) =>
@@ -307,35 +319,18 @@ public sealed class TelegramBotMessenger(
         }
     }
 
-    private static string? BuildBody(MediaPayload payload, int maxLength)
+    private static string? BuildBody(MediaPayload payload, int maxLength) => Fit(payload.Body, maxLength);
+
+    /// <summary>Cuts <paramref name="text"/> to Telegram's <paramref name="maxLength"/>, marking the cut with an ellipsis.</summary>
+    internal static string? Fit(string? text, int maxLength)
     {
-        // Prefer the description (the actual post body — what the user wrote on IG, TikTok, etc.)
-        // over the title (which yt-dlp often synthesises as "Video by <uploader>" for short-form).
-        var primary = !string.IsNullOrWhiteSpace(payload.Description)
-            ? payload.Description.Trim()
-            : !string.IsNullOrWhiteSpace(payload.Title)
-                ? payload.Title.Trim()
-                : null;
-
-        var author = !string.IsNullOrWhiteSpace(payload.Author)
-            ? payload.Author.Trim()
-            : null;
-
-        var body = (primary, author) switch
-        {
-            (string p, string a) => $"{p}\n\n— {a}",
-            (string p, null) => p,
-            (null, string a) => $"— {a}",
-            _ => null,
-        };
-
-        if (body is null)
+        if (text is null)
         {
             return null;
         }
 
-        return body.Length > maxLength
-            ? body[..(maxLength - 1)] + "…"
-            : body;
+        return text.Length > maxLength
+            ? text[..(maxLength - 1)] + "…"
+            : text;
     }
 }

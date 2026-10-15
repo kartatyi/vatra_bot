@@ -28,9 +28,11 @@ public interface IRepostEventStore
 
     /// <summary>
     /// The most recent hard failures, newest first, capped at <paramref name="limit"/> — the broken links
-    /// the <c>/failures</c> command and the dashboard table show.
+    /// the <c>/failures</c> command and the dashboard table show. A <paramref name="chatHash"/> (see
+    /// <see cref="ChatHasher"/>) narrows them to that one chat, so a group never reads another group's
+    /// links; <see langword="null"/> spans every chat, which only the operator's dashboard asks for.
     /// </summary>
-    Task<IReadOnlyList<RecentFailure>> GetRecentFailuresAsync(int limit, CancellationToken cancellationToken);
+    Task<IReadOnlyList<RecentFailure>> GetRecentFailuresAsync(int limit, string? chatHash, CancellationToken cancellationToken);
 
     /// <summary>
     /// Successful reposts in one chat, counted per person and host, since <paramref name="since"/> —

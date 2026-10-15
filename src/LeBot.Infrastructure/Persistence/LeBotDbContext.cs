@@ -5,8 +5,9 @@ using Microsoft.EntityFrameworkCore;
 namespace LeBot.Infrastructure.Persistence;
 
 /// <summary>
-/// EF Core context for the durable repost journal. Append-only in practice: the bot only ever inserts
-/// <see cref="RepostEvent"/>s and the dashboard only ever reads rollups, so reads run untracked.
+/// EF Core context for the durable repost journal and the per-chat settings. The journal is append-only
+/// in practice: the bot only ever inserts <see cref="RepostEvent"/>s and the dashboard only ever reads
+/// rollups, so reads run untracked. Settings are the one table the bot updates in place.
 /// The Application's <see cref="RepostEvent"/> record is mapped here (in Infrastructure) via the Fluent
 /// API, keeping persistence attributes out of the Application layer.
 /// </summary>
@@ -15,6 +16,10 @@ public sealed class LeBotDbContext(DbContextOptions<LeBotDbContext> options) : D
     public DbSet<RepostEvent> RepostEvents => Set<RepostEvent>();
 
     internal DbSet<StatsOptOutRow> StatsOptOuts => Set<StatsOptOutRow>();
+
+    internal DbSet<ChatSettingsRow> ChatSettings => Set<ChatSettingsRow>();
+
+    internal DbSet<RevealableTextRow> RevealableTexts => Set<RevealableTextRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -58,5 +63,29 @@ public sealed class LeBotDbContext(DbContextOptions<LeBotDbContext> options) : D
         var optOut = modelBuilder.Entity<StatsOptOutRow>();
         optOut.ToTable("StatsOptOuts");
         optOut.HasKey(o => new { o.ChatHash, o.UserId });
+
+        var chatSettings = modelBuilder.Entity<ChatSettingsRow>();
+        chatSettings.ToTable("ChatSettings");
+        chatSettings.HasKey(s => s.ChatHash);
+        // Text for the same reason as Outcome: a raw SELECT should read "Off", not "0".
+        chatSettings.Property(s => s.VideoCaption).HasConversion<string>().IsRequired();
+        chatSettings.Property(s => s.PostCaption).HasConversion<string>().IsRequired();
+        chatSettings.Property(s => s.UpdatedAt)
+            .HasConversion(
+                value => value.ToUniversalTime().ToString(occurredAtFormat, CultureInfo.InvariantCulture),
+                stored => DateTimeOffset.Parse(stored, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind))
+            .IsRequired();
+
+        var revealable = modelBuilder.Entity<RevealableTextRow>();
+        revealable.ToTable("RevealableTexts");
+        revealable.HasKey(r => new { r.ChatHash, r.MessageId });
+        revealable.Property(r => r.Text).IsRequired();
+        // Same sortable text format as OccurredAt, so the expiry sweep's "<" compares chronologically.
+        revealable.Property(r => r.CreatedAt)
+            .HasConversion(
+                value => value.ToUniversalTime().ToString(occurredAtFormat, CultureInfo.InvariantCulture),
+                stored => DateTimeOffset.Parse(stored, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind))
+            .IsRequired();
+        revealable.HasIndex(r => r.CreatedAt);
     }
 }
