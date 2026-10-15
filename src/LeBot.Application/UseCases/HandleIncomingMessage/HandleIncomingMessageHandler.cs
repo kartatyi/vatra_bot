@@ -71,6 +71,10 @@ public sealed class HandleIncomingMessageHandler(
             return;
         }
 
+        // From here on it can take a while — mark the link itself, which is harder to miss than the
+        // header status. A cache hit (above) answers too fast to need it.
+        await using var working = await messenger.MarkWorkingAsync(message.ChatId, message.MessageId, cancellationToken);
+
         (MediaPayload Payload, string Extractor)? textFallback = null;
         var sawSubstantiveAttempt = false;
 

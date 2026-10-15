@@ -58,6 +58,47 @@ public class HandleIncomingMessageHandlerTests
     }
 
     [Fact]
+    public async Task HandleAsync_CacheMiss_MarksTheMessageWhileWorking_ThenUnmarksIt()
+    {
+        var url = new Uri("https://example.com/x");
+        var item = new MediaItem("/tmp/x.mp4", MediaKind.Video, null, null, null);
+        var payload = new MediaPayload(url, null, null, [item]);
+        var working = Substitute.For<IAsyncDisposable>();
+        _messenger.MarkWorkingAsync(123L, 7, Arg.Any<CancellationToken>()).Returns(working);
+
+        _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
+        _extractor.CanHandle(url).Returns(true);
+        _extractor.ExtractAsync(url, Arg.Any<CancellationToken>())
+            .Returns(Result<MediaPayload, ExtractionError>.Success(payload));
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        Received.InOrder(() =>
+        {
+            _messenger.MarkWorkingAsync(123L, 7, Arg.Any<CancellationToken>());
+            _messenger.ReplyWithMediaAsync(123L, 7, payload, Arg.Any<CancellationToken>());
+        });
+        await working.Received(1).DisposeAsync();
+    }
+
+    [Fact]
+    public async Task HandleAsync_CacheHit_DoesNotMarkTheMessage()
+    {
+        var url = new Uri("https://tiktok.com/@user/video/1");
+        var item = new MediaItem("/cache/ab/00.mp4", MediaKind.Video, "video/mp4", 100, 5);
+        var stored = new MediaPayload(url, null, "user", [item], "body", RetainFiles: true);
+
+        _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
+        _extractor.CanHandle(url).Returns(true);
+        _cache.TryGetAsync(url, Arg.Any<CancellationToken>())
+            .Returns(new CachedRepost(stored, "YtDlpPlatformExtractor"));
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        await _messenger.DidNotReceiveWithAnyArgs().MarkWorkingAsync(default, default, default);
+    }
+
+    [Fact]
     public async Task HandleAsync_UnsupportedUrl_DoesNotRaiseBusyIndicator()
     {
         var url = new Uri("https://unsupported.example.com/x");

@@ -34,6 +34,13 @@ public interface ITelegramMessenger
     /// because Telegram dismisses each call after ~5 seconds.
     /// </summary>
     IAsyncDisposable IndicateBusy(long chatId, BusyKind kind);
+
+    /// <summary>
+    /// Puts a "working on it" reaction on the message <paramref name="messageId"/>; disposing the handle
+    /// takes it off again. Best-effort: when the chat doesn't allow the reaction, nothing shows and
+    /// nothing throws.
+    /// </summary>
+    Task<IAsyncDisposable> MarkWorkingAsync(long chatId, int messageId, CancellationToken cancellationToken);
 }
 
 /// <summary>

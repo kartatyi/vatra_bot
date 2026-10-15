@@ -108,6 +108,9 @@ public sealed class TelegramBotMessenger(
             cancellationToken: ct), cancellationToken);
     }
 
+    public async Task<IAsyncDisposable> MarkWorkingAsync(long chatId, int messageId, CancellationToken cancellationToken) =>
+        await TelegramWorkingReaction.PlaceAsync(bot, chatId, messageId, logger, cancellationToken);
+
     public IAsyncDisposable IndicateBusy(long chatId, BusyKind kind)
     {
         var action = kind switch
