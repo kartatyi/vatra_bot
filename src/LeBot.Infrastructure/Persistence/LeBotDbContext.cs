@@ -17,6 +17,8 @@ public sealed class LeBotDbContext(DbContextOptions<LeBotDbContext> options) : D
 
     internal DbSet<StatsOptOutRow> StatsOptOuts => Set<StatsOptOutRow>();
 
+    internal DbSet<SeenLinkRow> SeenLinks => Set<SeenLinkRow>();
+
     internal DbSet<ChatSettingsRow> ChatSettings => Set<ChatSettingsRow>();
 
     internal DbSet<RevealableTextRow> RevealableTexts => Set<RevealableTextRow>();
@@ -87,5 +89,14 @@ public sealed class LeBotDbContext(DbContextOptions<LeBotDbContext> options) : D
                 stored => DateTimeOffset.Parse(stored, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind))
             .IsRequired();
         revealable.HasIndex(r => r.CreatedAt);
+
+        var seenLink = modelBuilder.Entity<SeenLinkRow>();
+        seenLink.ToTable("SeenLinks");
+        seenLink.HasKey(s => new { s.ChatHash, s.LinkKey });
+        seenLink.Property(s => s.FirstSeenAt)
+            .HasConversion(
+                value => value.ToUniversalTime().ToString(occurredAtFormat, CultureInfo.InvariantCulture),
+                stored => DateTimeOffset.Parse(stored, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind))
+            .IsRequired();
     }
 }

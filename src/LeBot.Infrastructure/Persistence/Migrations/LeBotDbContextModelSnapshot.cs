@@ -128,6 +128,23 @@ namespace LeBot.Infrastructure.Persistence.Migrations
                     b.ToTable("RevealableTexts", (string)null);
                 });
 
+            modelBuilder.Entity("LeBot.Infrastructure.Persistence.SeenLinkRow", b =>
+                {
+                    b.Property<string>("ChatHash")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LinkKey")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FirstSeenAt")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("ChatHash", "LinkKey");
+
+                    b.ToTable("SeenLinks", (string)null);
+                });
+
             modelBuilder.Entity("LeBot.Infrastructure.Persistence.StatsOptOutRow", b =>
                 {
                     b.Property<string>("ChatHash")
