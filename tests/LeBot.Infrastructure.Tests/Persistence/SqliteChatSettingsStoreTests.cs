@@ -47,6 +47,16 @@ public sealed class SqliteChatSettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task SaveAsync_ShrugOnFailure_RoundTrips()
+    {
+        var saved = ChatSettings.Default with { ShrugOnFailure = true };
+
+        await _sut.SaveAsync(-100123, saved, CancellationToken.None);
+
+        (await _sut.GetAsync(-100123, CancellationToken.None)).ShrugOnFailure.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task SaveAsync_Twice_KeepsTheLatest()
     {
         await _sut.SaveAsync(-100123, new ChatSettings(CaptionMode.Brief, CaptionMode.Brief), CancellationToken.None);

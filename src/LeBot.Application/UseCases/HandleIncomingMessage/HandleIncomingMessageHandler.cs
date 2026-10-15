@@ -89,22 +89,27 @@ public sealed class HandleIncomingMessageHandler(
         // From here on it can take a while — mark the link itself, which is harder to miss than the
         // header status. A cache hit (above) answers too fast to need it.
         await messenger.SetReactionAsync(message.ChatId, message.MessageId, LinkReaction.Working, cancellationToken);
+        var failed = false;
         try
         {
-            await ExtractAndReplyAsync(message, url, candidates, settings, startedAt, cancellationToken);
+            failed = await ExtractAndReplyAsync(message, url, candidates, settings, startedAt, cancellationToken);
         }
         finally
         {
-            // No token: the working mark has to come off even when the work was cancelled.
-            await messenger.SetReactionAsync(message.ChatId, message.MessageId, settled, CancellationToken.None);
+            // A chat that opted in hears about a failure; otherwise silence stands, and only a repeat
+            // leaves a mark. No token: the working mark has to come off even when the work was cancelled.
+            var final = failed && settings.ShrugOnFailure ? LinkReaction.Failed : settled;
+            await messenger.SetReactionAsync(message.ChatId, message.MessageId, final, CancellationToken.None);
         }
     }
 
     /// <summary>
     /// Runs the extractor chain for a cache miss and replies with the first thing worth sending —
-    /// media, else text — or stays silent. Every outcome is journalled.
+    /// media, else text — or stays silent. Every outcome is journalled. Returns true when an extractor
+    /// took the link on and nothing came of it — not when no extractor claimed it at all, which is the
+    /// everyday case for a news or GitHub link and no failure.
     /// </summary>
-    private async Task ExtractAndReplyAsync(
+    private async Task<bool> ExtractAndReplyAsync(
         IncomingMessage message,
         Uri url,
         IReadOnlyList<IPlatformExtractor> candidates,
@@ -136,7 +141,7 @@ public sealed class HandleIncomingMessageHandler(
                     logger.LogInformation(
                         "Reposted {Count} media item(s) from {Url} via {Extractor} into chat {ChatId}",
                         ok.Value.Items.Count, url, extractorName, message.ChatId);
-                    return;
+                    return false;
 
                 case Result<MediaPayload, ExtractionError>.Ok ok when HasReplyableText(ok.Value):
                     textFallback ??= (ok.Value, extractorName);
@@ -182,7 +187,7 @@ public sealed class HandleIncomingMessageHandler(
             logger.LogInformation(
                 "Reposted text body from {Url} into chat {ChatId}",
                 url, message.ChatId);
-            return;
+            return false;
         }
 
         if (!sawSubstantiveAttempt)
@@ -195,13 +200,14 @@ public sealed class HandleIncomingMessageHandler(
             await journal.RecordNoExtractorAsync(
                 url, timeProvider.GetElapsedTime(startedAt), message.ChatId, cancellationToken);
             logger.LogDebug("No extractor claimed {Url} — silent skip", url);
-            return;
+            return false;
         }
 
         // An extractor claimed the URL but produced neither media nor a text fallback. Stay silent
         // rather than posting a "couldn't extract" notice — the per-extractor outcome (a Failure or
         // NothingExtracted row) was already journalled in the loop above.
         logger.LogDebug("Nothing extractable from {Url} — staying silent", url);
+        return true;
     }
 
     /// <summary>

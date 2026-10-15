@@ -16,6 +16,7 @@ public class TelegramBotMessengerReactionTests
     [Theory]
     [InlineData(LinkReaction.Working, "👀")]
     [InlineData(LinkReaction.Repeat, "🥱")]
+    [InlineData(LinkReaction.Failed, "🤷")]
     public async Task SetReactionAsync_SetsTheReactionsEmoji(LinkReaction reaction, string emoji)
     {
         await CreateSut().SetReactionAsync(1L, 2, reaction, CancellationToken.None);
