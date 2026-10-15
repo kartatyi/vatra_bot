@@ -24,12 +24,18 @@ namespace LeBot.Domain.Settings;
 /// Whether the chat gets a Monday-morning summary of last week's links. Off by default: the bot speaks
 /// when spoken to, and a scheduled post is the one exception a chat has to ask for.
 /// </param>
+/// <param name="KeepStats">
+/// Whether the bot records who posts which link in this chat — what <c>/leaders</c>, <c>/me</c>, the badges
+/// and the digest's top droppers are made of. On by default; off, those go quiet, and only counts that
+/// identify nobody are kept.
+/// </param>
 public sealed record ChatSettings(
     CaptionMode VideoCaption,
     CaptionMode PostCaption,
     bool OfferFullText = true,
     bool ShrugOnFailure = false,
-    bool WeeklyDigest = false)
+    bool WeeklyDigest = false,
+    bool KeepStats = true)
 {
     /// <summary>What a chat gets before anyone has opened <c>/settings</c>.</summary>
     public static ChatSettings Default { get; } = new(CaptionMode.Off, CaptionMode.Full);

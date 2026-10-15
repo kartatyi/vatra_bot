@@ -249,6 +249,9 @@ public sealed class TelegramUpdateDispatcher(
             case "top":
                 await ReplyAsync(message, await BuildTopAsync(lang, cancellationToken), cancellationToken);
                 return true;
+            case "leaders" or "me" when !(await settingsStore.GetAsync(message.Chat.Id, cancellationToken)).KeepStats:
+                await ReplyAsync(message, LeaderboardFormatter.StatsOff(lang), cancellationToken);
+                return true;
             case "leaders":
                 await ReplyAsync(message, await BuildLeadersAsync(message, argument, lang, cancellationToken), cancellationToken);
                 return true;

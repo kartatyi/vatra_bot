@@ -24,7 +24,7 @@ internal sealed class SqliteChatSettingsStore(
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
             var row = await db.ChatSettings.AsNoTracking()
                 .FirstOrDefaultAsync(r => r.ChatHash == chatHash, cancellationToken);
-            return row is null ? ChatSettings.Default : new ChatSettings(row.VideoCaption, row.PostCaption, row.OfferFullText, row.ShrugOnFailure, row.WeeklyDigest);
+            return row is null ? ChatSettings.Default : new ChatSettings(row.VideoCaption, row.PostCaption, row.OfferFullText, row.ShrugOnFailure, row.WeeklyDigest, KeepStats: !row.StatsOff);
         }
         catch (Exception ex) when (ex is SqliteException or InvalidOperationException)
         {
@@ -50,6 +50,7 @@ internal sealed class SqliteChatSettingsStore(
         row.OfferFullText = settings.OfferFullText;
         row.ShrugOnFailure = settings.ShrugOnFailure;
         row.WeeklyDigest = settings.WeeklyDigest;
+        row.StatsOff = !settings.KeepStats;
         row.ChatId = settings.WeeklyDigest ? chatId : null;
         row.UpdatedAt = timeProvider.GetUtcNow();
         await db.SaveChangesAsync(cancellationToken);

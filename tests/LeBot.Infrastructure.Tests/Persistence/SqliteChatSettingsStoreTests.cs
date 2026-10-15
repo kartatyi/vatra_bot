@@ -77,6 +77,16 @@ public sealed class SqliteChatSettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task KeepStats_DefaultsOn_AndOffRoundTrips()
+    {
+        (await _sut.GetAsync(-100123, CancellationToken.None)).KeepStats.Should().BeTrue();
+
+        await _sut.SaveAsync(-100123, ChatSettings.Default with { KeepStats = false }, CancellationToken.None);
+
+        (await _sut.GetAsync(-100123, CancellationToken.None)).KeepStats.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task SaveAsync_Twice_KeepsTheLatest()
     {
         await _sut.SaveAsync(-100123, new ChatSettings(CaptionMode.Brief, CaptionMode.Brief), CancellationToken.None);

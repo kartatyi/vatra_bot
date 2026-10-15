@@ -91,6 +91,22 @@ public class HandleIncomingMessageHandlerTests
     }
 
     [Fact]
+    public async Task HandleAsync_StatsOff_RecordsNoSenderAnywhere()
+    {
+        var url = new Uri("https://example.com/x");
+        var payload = VideoPayload(url);
+        ArrangeExtraction(url, payload);
+        _settings.GetAsync(123L, Arg.Any<CancellationToken>())
+            .Returns(new ChatSettings(CaptionMode.Full, CaptionMode.Full, KeepStats: false));
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        await _seenLinks.Received(1).MarkSeenAsync(123L, url, null, Arg.Any<CancellationToken>());
+        await _journal.Received(1).RecordMediaRepostAsync(
+            url, Arg.Any<string>(), 1, Arg.Any<long?>(), Arg.Any<TimeSpan>(), 123L, Arg.Is<long?>(sender => sender == null), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task HandleAsync_RecordsWhoPostedTheLink()
     {
         var url = new Uri("https://example.com/x");

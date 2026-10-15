@@ -12,6 +12,7 @@ public class ChatSettingsKeyboardTests
         ["✅ 🔘 Button on", "🔘 Button off"],
         ["🤷 Shrug on", "✅ 🤷 Shrug off"],
         ["📬 Digest on", "✅ 📬 Digest off"],
+        ["✅ 📊 Stats on", "📊 Stats off"],
     ];
 
     [Fact]
@@ -57,6 +58,16 @@ public class ChatSettingsKeyboardTests
 
         applied.Should().BeTrue();
         updated.Should().Be(ChatSettings.Default with { ShrugOnFailure = shrug });
+    }
+
+    [Fact]
+    public void TryApply_StatsRow_TurnsStatsOff_AndThePostRowKeepsIt()
+    {
+        ChatSettingsKeyboard.TryApply("cfg:t:Off", ChatSettings.Default, out var off).Should().BeTrue();
+        ChatSettingsKeyboard.TryApply("cfg:p:Brief", off, out var afterPostRow);
+
+        off.Should().Be(ChatSettings.Default with { KeepStats = false });
+        afterPostRow.KeepStats.Should().BeFalse();
     }
 
     [Fact]
