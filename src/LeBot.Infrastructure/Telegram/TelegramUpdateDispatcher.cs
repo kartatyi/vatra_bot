@@ -26,6 +26,7 @@ public sealed class TelegramUpdateDispatcher(
     ITelegramBotClient bot,
     HandleIncomingMessageHandler handler,
     AnswerInlineQueryHandler inlineHandler,
+    CompleteInlinePlaceholderHandler placeholderHandler,
     RepostMetrics metrics,
     IRepostEventStore eventStore,
     IStatsOptOutStore optOuts,
@@ -80,7 +81,7 @@ public sealed class TelegramUpdateDispatcher(
                     offset: offset,
                     limit: 100,
                     timeout: _options.PollingTimeoutSeconds,
-                    allowedUpdates: [UpdateType.Message, UpdateType.CallbackQuery, UpdateType.InlineQuery],
+                    allowedUpdates: [UpdateType.Message, UpdateType.CallbackQuery, UpdateType.InlineQuery, UpdateType.ChosenInlineResult],
                     cancellationToken: stoppingToken);
 
                 if (!announcedServing)
@@ -128,6 +129,14 @@ public sealed class TelegramUpdateDispatcher(
             // Not awaited: an inline answer may wait seconds for a download, and the poll loop handles
             // one update at a time — awaiting here would stall every group's reposts behind it.
             _ = AnswerInlineAsync(update.Id, inlineQuery, cancellationToken);
+            return;
+        }
+
+        // A "loading" placeholder was sent: finishing it can take minutes, so it too runs off the loop.
+        if (update.ChosenInlineResult is { InlineMessageId: { } inlineMessageId } chosen &&
+            InlineResults.TryParsePending(chosen.ResultId, out var withText))
+        {
+            _ = CompletePlaceholderAsync(update.Id, new ChosenPlaceholder(inlineMessageId, chosen.Query, withText), cancellationToken);
             return;
         }
 
@@ -188,6 +197,24 @@ public sealed class TelegramUpdateDispatcher(
         catch (Exception ex)
         {
             logger.LogError(ex, "Unhandled error answering inline update {UpdateId}", updateId);
+        }
+    }
+
+    /// <summary>Completes a sent placeholder off the poll loop — its own boundary, like <see cref="AnswerInlineAsync"/>.</summary>
+    private async Task CompletePlaceholderAsync(int updateId, ChosenPlaceholder chosen, CancellationToken cancellationToken)
+    {
+        using var scope = logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = updateId });
+        try
+        {
+            await placeholderHandler.HandleAsync(chosen, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Shutting down; the placeholder stays as it is.
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Unhandled error completing inline placeholder {UpdateId}", updateId);
         }
     }
 

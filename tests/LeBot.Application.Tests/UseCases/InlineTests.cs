@@ -17,6 +17,7 @@ public class InlineTests
     private readonly IInlineMediaUploader _uploader = Substitute.For<IInlineMediaUploader>();
     private readonly IPreparedPostStore _store = Substitute.For<IPreparedPostStore>();
     private readonly IInlineAnswerer _answerer = Substitute.For<IInlineAnswerer>();
+    private readonly IInlineMessageEditor _editor = Substitute.For<IInlineMessageEditor>();
     private readonly FakeTimeProvider _time = new();
 
     public InlineTests()
@@ -152,6 +153,43 @@ public class InlineTests
         (await first).Should().Be(await second);
         await _store.Received(1).TryGetAsync(Url, Arg.Any<CancellationToken>());
     }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CompletePlaceholder_PreparedPost_ReplacesThePlaceholder(bool withText)
+    {
+        var post = new PreparedPost(MediaKind.Video, "file-1", "body");
+        _store.TryGetAsync(Url, Arg.Any<CancellationToken>()).Returns(post);
+
+        await CreatePlaceholderHandler().HandleAsync(new ChosenPlaceholder("im-1", Url.AbsoluteUri, withText), CancellationToken.None);
+
+        await _editor.Received(1).ShowPostAsync("im-1", post, withText, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CompletePlaceholder_NothingFetchable_ShowsTheFailure()
+    {
+        _extractor.ExtractAsync(Url, Arg.Any<CancellationToken>())
+            .Returns(Result<MediaPayload, ExtractionError>.Failure(new ExtractionError.ContentUnavailable(Url, "gone")));
+
+        await CreatePlaceholderHandler().HandleAsync(new ChosenPlaceholder("im-1", Url.AbsoluteUri, false), CancellationToken.None);
+
+        await _editor.Received(1).ShowFailureAsync("im-1", Url, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CompletePlaceholder_NoLink_LeavesItAlone()
+    {
+        _urls.Extract("hello").Returns([]);
+
+        await CreatePlaceholderHandler().HandleAsync(new ChosenPlaceholder("im-1", "hello", false), CancellationToken.None);
+
+        _editor.ReceivedCalls().Should().BeEmpty();
+    }
+
+    private CompleteInlinePlaceholderHandler CreatePlaceholderHandler() =>
+        new(_urls, CreatePreparer(), _editor, NullLogger<CompleteInlinePlaceholderHandler>.Instance);
 
     private InlinePostPreparer CreatePreparer() =>
         new(_cache, [_extractor], _uploader, _store, _time, NullLogger<InlinePostPreparer>.Instance);

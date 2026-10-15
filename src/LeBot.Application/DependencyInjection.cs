@@ -21,6 +21,7 @@ public static class DependencyInjection
         services.AddSingleton<HandleIncomingMessageHandler>();
         services.AddSingleton<InlinePostPreparer>();
         services.AddSingleton<AnswerInlineQueryHandler>();
+        services.AddSingleton<CompleteInlinePlaceholderHandler>();
         return services;
     }
 }

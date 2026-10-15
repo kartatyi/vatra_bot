@@ -57,19 +57,46 @@ public class InlineResultsTests
         results[1].Should().BeOfType<InlineQueryResultCachedVideo>().Which.Caption!.Length.Should().Be(1024);
     }
 
-    [Theory]
-    [InlineData(false, InlineResults.NotReadyTitle)]
-    [InlineData(true, InlineResults.FailedTitle)]
-    public void For_NotReadyOrFailed_OffersTheLinkItself_Uncached(bool failed, string title)
+    [Fact]
+    public void For_Failed_OffersTheLinkItself_Uncached()
     {
-        InlineAnswer answer = failed ? new InlineAnswer.Failed(Url) : new InlineAnswer.NotReady(Url);
-
-        var (results, cache) = InlineResults.For(answer);
+        var (results, cache) = InlineResults.For(new InlineAnswer.Failed(Url));
 
         var article = results.Should().ContainSingle().Which.Should().BeOfType<InlineQueryResultArticle>().Subject;
-        article.Title.Should().Be(title);
+        article.Title.Should().Be(InlineResults.FailedTitle);
         article.InputMessageContent.Should().BeOfType<InputTextMessageContent>().Which.MessageText.Should().Be(Url.AbsoluteUri);
         cache.Should().Be(0);
+    }
+
+    [Fact]
+    public void For_NotReady_OffersTwoPlaceholdersWithTheOriginalLink_Uncached()
+    {
+        var (results, cache) = InlineResults.For(new InlineAnswer.NotReady(Url));
+
+        var articles = results.Should().AllBeOfType<InlineQueryResultArticle>().Subject.ToList();
+        articles.Select(a => a.Title).Should().Equal(InlineResults.PendingTitle, InlineResults.PendingWithTextTitle);
+        articles.Should().AllSatisfy(a =>
+        {
+            a.InputMessageContent.Should().BeOfType<InputTextMessageContent>()
+                .Which.MessageText.Should().Be($"{InlineResults.LoadingText}\n{Url.AbsoluteUri}");
+            // Without a keyboard Telegram never reports the inline message id, and the placeholder can't be edited.
+            a.ReplyMarkup!.InlineKeyboard.Single().Single().Url.Should().Be(Url.AbsoluteUri);
+        });
+        cache.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("pending:bare", true, false)]
+    [InlineData("pending:text", true, true)]
+    [InlineData("bare", false, false)]
+    [InlineData("failed", false, false)]
+    public void TryParsePending_RecognisesOnlyThePlaceholders(string resultId, bool pending, bool withText)
+    {
+        InlineResults.TryParsePending(resultId, out var parsedWithText).Should().Be(pending);
+        if (pending)
+        {
+            parsedWithText.Should().Be(withText);
+        }
     }
 
     [Fact]

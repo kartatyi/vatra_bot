@@ -1,6 +1,7 @@
 using LeBot.Application.UseCases.AnswerInlineQuery;
 using LeBot.Domain.Media;
 using Telegram.Bot.Types.InlineQueryResults;
+using Telegram.Bot.Types.ReplyMarkups;
 
 namespace LeBot.Infrastructure.Telegram;
 
@@ -10,11 +11,17 @@ namespace LeBot.Infrastructure.Telegram;
 /// </summary>
 internal static class InlineResults
 {
-    public const string NotReadyTitle = "⏳ Not ready yet — send the link instead";
+    public const string PendingTitle = "⏳ Media — appears in a moment";
+    public const string PendingWithTextTitle = "⏳ Media + text — appears in a moment";
+    public const string LoadingText = "⏳ Loading the media…";
+    public const string OriginalButton = "🔗 Original";
     public const string FailedTitle = "🤷 Couldn't get media from this link";
 
-    private const int CaptionLimit = 1024;
-    private const int TextLimit = 4096;
+    internal const int CaptionLimit = 1024;
+    internal const int TextLimit = 4096;
+
+    private const string PendingBareId = "pending:bare";
+    private const string PendingTextId = "pending:text";
     private const int PreviewLength = 80;
 
     /// <summary>
@@ -25,10 +32,37 @@ internal static class InlineResults
     {
         InlineAnswer.Ready { Post.HasMedia: true } ready => (MediaResults(ready.Post), 300),
         InlineAnswer.Ready ready => (TextResults(ready.Post), 300),
-        InlineAnswer.NotReady notReady => ([LinkArticle("wait", NotReadyTitle, notReady.Url)], 0),
+        InlineAnswer.NotReady notReady => (PendingResults(notReady.Url), 0),
         InlineAnswer.Failed failed => ([LinkArticle("failed", FailedTitle, failed.Url)], 0),
         _ => ([], 0),
     };
+
+    /// <summary>
+    /// Whether <paramref name="resultId"/> is one of the "loading" placeholders, and which. Anything else —
+    /// a ready post, the failure notice — needs no follow-up once chosen.
+    /// </summary>
+    public static bool TryParsePending(string resultId, out bool withText)
+    {
+        withText = resultId == PendingTextId;
+        return resultId is PendingBareId or PendingTextId;
+    }
+
+    /// <summary>The "🔗 Original" button under a placeholder: somewhere to go while it loads, or if it never does.</summary>
+    public static InlineKeyboardMarkup OriginalLink(Uri url) => new(InlineKeyboardButton.WithUrl(OriginalButton, url.AbsoluteUri));
+
+    /// <summary>
+    /// Two placeholders mirroring the ready choices. The keyboard isn't decoration: Telegram only reports
+    /// which inline message was sent — the handle the bot needs to edit it later — when it carries one.
+    /// </summary>
+    private static List<InlineQueryResult> PendingResults(Uri url)
+    {
+        var content = new InputTextMessageContent($"{LoadingText}\n{url.AbsoluteUri}");
+        return
+        [
+            new InlineQueryResultArticle(PendingBareId, PendingTitle, content) { Description = url.AbsoluteUri, ReplyMarkup = OriginalLink(url) },
+            new InlineQueryResultArticle(PendingTextId, PendingWithTextTitle, content) { Description = url.AbsoluteUri, ReplyMarkup = OriginalLink(url) },
+        ];
+    }
 
     /// <summary>The bare file, and — when the post has text — the file with the text as its caption.</summary>
     private static List<InlineQueryResult> MediaResults(PreparedPost post)
@@ -75,6 +109,6 @@ internal static class InlineResults
         return oneLine.Length > PreviewLength ? oneLine[..(PreviewLength - 1)] + "…" : oneLine;
     }
 
-    private static string Fit(string text, int limit) =>
+    internal static string Fit(string text, int limit) =>
         text.Length > limit ? text[..(limit - 1)] + "…" : text;
 }
