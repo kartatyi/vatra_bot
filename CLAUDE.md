@@ -209,6 +209,15 @@ Stats knobs ([`StatsOptions`](src/LeBot.Infrastructure/Configuration/StatsOption
 }
 ```
 
+Feedback knobs ([`FeedbackOptions`](src/LeBot.Infrastructure/Configuration/FeedbackOptions.cs), `Feedback` section) — where `/feedback` lands:
+
+```jsonc
+"Feedback": {
+  "ChatId": null,         // maintainer's chat — deployment identity, local config only; unset → Update:NotifyChatId
+  "CooldownSeconds": 60   // per sender, so one person can't flood the maintainer
+}
+```
+
 ## Docs
 
 | File | For | Holds |

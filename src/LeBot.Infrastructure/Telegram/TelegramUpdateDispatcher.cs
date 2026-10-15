@@ -30,6 +30,7 @@ public sealed class TelegramUpdateDispatcher(
     IRepostEventStore eventStore,
     IStatsOptOutStore optOuts,
     PersonStats personStats,
+    FeedbackRelay feedback,
     IChatSettingsStore settingsStore,
     IRevealableTextStore revealableTexts,
     IAppVersion appVersion,
@@ -225,6 +226,9 @@ public sealed class TelegramUpdateDispatcher(
                 return true;
             case "me":
                 await ReplyAsync(message, await BuildMeAsync(message, argument, cancellationToken), cancellationToken);
+                return true;
+            case "feedback":
+                await ReplyAsync(message, await feedback.RelayAsync(message, argument, cancellationToken), cancellationToken);
                 return true;
             case "settings":
                 var settings = await settingsStore.GetAsync(message.Chat.Id, cancellationToken);
