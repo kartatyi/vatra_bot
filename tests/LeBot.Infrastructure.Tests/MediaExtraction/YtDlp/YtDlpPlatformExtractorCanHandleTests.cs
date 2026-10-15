@@ -1,5 +1,6 @@
 using LeBot.Infrastructure.Configuration;
 using LeBot.Infrastructure.MediaExtraction.YtDlp;
+using LeBot.Infrastructure.MediaProcessing;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -13,7 +14,10 @@ public class YtDlpPlatformExtractorCanHandleTests
         {
             DownloadDirectory = Path.GetTempPath(),
         });
-        return new YtDlpPlatformExtractor(options, NullLogger<YtDlpPlatformExtractor>.Instance);
+        return new YtDlpPlatformExtractor(
+            options,
+            Substitute.For<IVideoCompressor>(),
+            NullLogger<YtDlpPlatformExtractor>.Instance);
     }
 
     [Theory]

@@ -57,7 +57,8 @@ C:\LeBot\
   tools\
     yt-dlp\
       yt-dlp.exe
-      ffmpeg.exe        # optional, only required if you want max-quality DASH merges
+      ffmpeg.exe        # optional — DASH merges, and squeezing a video over MaxFileSizeMb under it
+      ffprobe.exe       # ships with ffmpeg; compression reads a video's length with it
   downloads\            # created on first run, beside the exe; files >1h old swept every 30 min
   cache\                # created on first run; one folder per link, kept 24h, capped at 2 GB
   logs\                 # created on first run, beside the exe; daily rotation, last 7 kept

@@ -9,6 +9,7 @@ using LeBot.Infrastructure.MediaExtraction.Instagram;
 using LeBot.Infrastructure.MediaExtraction.Threads;
 using LeBot.Infrastructure.MediaExtraction.ThreadsEmbed;
 using LeBot.Infrastructure.MediaExtraction.YtDlp;
+using LeBot.Infrastructure.MediaProcessing;
 using LeBot.Infrastructure.Persistence;
 using LeBot.Infrastructure.Releases;
 using LeBot.Infrastructure.Telegram;
@@ -113,6 +114,8 @@ public static class DependencyInjection
         // auto.ria isn't in yt-dlp's site list; this extractor reposts an advert's photo gallery with
         // a spec caption. It claims only auto.ria advert URLs, so ordering ahead of yt-dlp is harmless.
         services.AddSingleton<IPlatformExtractor, AutoRiaExtractor>();
+        // Squeezes a yt-dlp download that came out over Telegram's upload cap back under it.
+        services.AddSingleton<IVideoCompressor, FfmpegVideoCompressor>();
         services.AddSingleton<IPlatformExtractor, YtDlpPlatformExtractor>();
 
         services.AddSingleton<IReleaseSource, GitHubReleaseSource>();
