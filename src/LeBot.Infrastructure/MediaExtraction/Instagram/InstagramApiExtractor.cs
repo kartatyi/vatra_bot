@@ -19,7 +19,8 @@ namespace LeBot.Infrastructure.MediaExtraction.Instagram;
 /// is dropped. Scraping the public embed HTML no longer works either — current Instagram renders
 /// carousel images client-side, so the markup carries no image URLs. The API needs a logged-in
 /// session, sourced from <see cref="IInstagramCookieProvider"/>; without one this extractor returns
-/// an empty payload and lets the chain fall through.
+/// an empty payload and lets the chain fall through. Because every call spends that session, it is
+/// registered after yt-dlp and only sees the posts the anonymous pass could not serve.
 /// </summary>
 internal sealed class InstagramApiExtractor : IPlatformExtractor
 {
@@ -77,7 +78,13 @@ internal sealed class InstagramApiExtractor : IPlatformExtractor
             .Build();
     }
 
-    public bool CanHandle(Uri url)
+    public bool CanHandle(Uri url) => Claims(url);
+
+    /// <summary>
+    /// The URLs this extractor serves with the logged-in session. Static so
+    /// <see cref="YtDlp.YtDlpPlatformExtractor"/> can leave the session to it on exactly these links.
+    /// </summary>
+    internal static bool Claims(Uri url)
     {
         var host = url.Host;
         if (host.StartsWith("www.", StringComparison.OrdinalIgnoreCase))

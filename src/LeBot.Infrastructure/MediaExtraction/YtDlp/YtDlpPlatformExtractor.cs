@@ -57,11 +57,68 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
         Uri url,
         CancellationToken cancellationToken)
     {
+        var attempt = await ExtractWithOptionsAsync(
+            url,
+            BuildOptionSet(withBrowserCookies: false),
+            cancellationToken);
+
+        // Anonymous first, the browser session only once that has failed. Every cookied run is
+        // traffic on a real account, and platforms flag and ban accounts for a bot's volume — this
+        // one already lost an Instagram account that way. Most public posts extract fine without a
+        // session; the cookies are kept for what genuinely needs one, such as age-gated posts.
+        if (attempt is not Result<MediaPayload, ExtractionError>.Err err
+            || !ShouldRetryWithCookies(url, err.Error))
+        {
+            return attempt;
+        }
+
+        _logger.LogWarning(
+            "Retrying {Url} with browser cookies after the anonymous attempt failed: {Detail}",
+            url,
+            err.Error.Reason);
+
+        var cookied = await ExtractWithOptionsAsync(
+            url,
+            BuildOptionSet(withBrowserCookies: true),
+            cancellationToken);
+        return KeepAnonymousFailureOverEmptyRetry(err, cookied);
+    }
+
+    /// <summary>
+    /// The cookied pass wins unless it found no media either. A session that yields only a title
+    /// has not recovered the post: YouTube, for one, lists nothing but storyboards to a logged-in
+    /// client it cannot verify, after the anonymous download already died on a 403. Returning that
+    /// title as a success would hide the real failure from the journal, the stats and the watchdog.
+    /// </summary>
+    internal static Result<MediaPayload, ExtractionError> KeepAnonymousFailureOverEmptyRetry(
+        Result<MediaPayload, ExtractionError>.Err anonymous,
+        Result<MediaPayload, ExtractionError> cookied) =>
+        cookied is Result<MediaPayload, ExtractionError>.Ok { Value.HasMedia: false } ? anonymous : cookied;
+
+    /// <summary>
+    /// True when a failed anonymous attempt is worth repeating with the browser session. Needs
+    /// cookies to be configured at all, and skips three failures the session should not be spent
+    /// on: a URL yt-dlp disowns — every shop and news link in the chat, where re-running would
+    /// double the cost of the common case for nothing; TikTok's bot challenge, which
+    /// <see cref="WithTransientRetryAsync"/> has already rolled ten times and which is not a login
+    /// problem; and an Instagram post, whose logged-in fallback is
+    /// <see cref="Instagram.InstagramApiExtractor"/>, registered after this extractor — running
+    /// yt-dlp on the session as well would spend the account twice on one link.
+    /// </summary>
+    internal bool ShouldRetryWithCookies(Uri url, ExtractionError error) =>
+        !string.IsNullOrEmpty(_options.CookiesFromBrowser)
+        && error is not ExtractionError.UnsupportedPlatform
+        && !YtDlpErrorClassifier.IsTransientChallengeFailure(error.Reason)
+        && !Instagram.InstagramApiExtractor.Claims(url);
+
+    private async Task<Result<MediaPayload, ExtractionError>> ExtractWithOptionsAsync(
+        Uri url,
+        OptionSet optionSet,
+        CancellationToken cancellationToken)
+    {
         // Defence-in-depth against CVE-2025-43858: feed the canonical, percent-encoded form
         // so any shell metacharacters from the user message are escaped before yt-dlp sees them.
         var sanitisedUrl = url.AbsoluteUri;
-
-        var optionSet = BuildOptionSet();
 
         try
         {
@@ -229,10 +286,10 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
         catch (UnauthorizedAccessException) { }
     }
 
-    internal OptionSet BuildOptionSet()
+    internal OptionSet BuildOptionSet(bool withBrowserCookies)
     {
         var opts = new OptionSet();
-        if (!string.IsNullOrEmpty(_options.CookiesFromBrowser))
+        if (withBrowserCookies && !string.IsNullOrEmpty(_options.CookiesFromBrowser))
         {
             opts.CookiesFromBrowser = _options.CookiesFromBrowser;
         }

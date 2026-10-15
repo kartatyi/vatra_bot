@@ -23,7 +23,7 @@ public class YtDlpPlatformExtractorOptionSetTests
         // track, so the format sort must steer "best" towards h264 — the variants
         // that actually carry sound. A format filter can't do this: [acodec!=none]
         // trusts the same lying metadata.
-        var optionSet = CreateSut().BuildOptionSet();
+        var optionSet = CreateSut().BuildOptionSet(withBrowserCookies: false);
 
         optionSet.FormatSort.Should().Be("vcodec:h264");
     }
