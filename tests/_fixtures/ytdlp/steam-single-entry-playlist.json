@@ -1,0 +1,53 @@
+{
+  "id": "3834090",
+  "title": "YAPYAP",
+  "_type": "playlist",
+  "webpage_url": "https://store.steampowered.com/app/3834090/YAPYAP/",
+  "extractor": "Steam",
+  "extractor_key": "Steam",
+  "playlist_count": 1,
+  "entries": [
+    {
+      "id": "3834090-1",
+      "title": "YAPYAP video 1",
+      "webpage_url": "https://store.steampowered.com/app/3834090/YAPYAP/",
+      "extractor": "Steam",
+      "extractor_key": "Steam",
+      "playlist_index": 1,
+      "formats": [
+        {
+          "format_id": "dash-dash_thumbnails",
+          "protocol": "mhtml",
+          "ext": "mhtml",
+          "vcodec": "none",
+          "acodec": "none",
+          "height": null
+        },
+        {
+          "format_id": "dash-4-0",
+          "protocol": "http_dash_segments",
+          "ext": "m4a",
+          "vcodec": "none",
+          "acodec": "mp4a.40.2",
+          "height": null
+        },
+        {
+          "format_id": "dash-1-0",
+          "protocol": "http_dash_segments",
+          "ext": "mp4",
+          "vcodec": "avc1.640029",
+          "acodec": "none",
+          "height": 720
+        },
+        {
+          "format_id": "hls-2600",
+          "protocol": "m3u8_native",
+          "ext": "mp4",
+          "vcodec": "avc1.640029",
+          "acodec": "none",
+          "height": 720
+        }
+      ]
+    }
+  ]
+}
