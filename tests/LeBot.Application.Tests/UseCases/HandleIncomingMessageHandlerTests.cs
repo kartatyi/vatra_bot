@@ -403,6 +403,61 @@ public class HandleIncomingMessageHandlerTests
         await _cache.Received(1).SaveAsync(payload, _extractor.GetType().Name, Arg.Any<CancellationToken>());
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task HandleAsync_TextFallbackAfterAnotherExtractorFailed_IsNotCached(bool failureFirst)
+    {
+        var url = new Uri("https://instagram.com/p/abc/");
+        var textPayload = new MediaPayload(url, null, "author", [], Description: "caption only");
+
+        var failing = Substitute.For<IPlatformExtractor>();
+        failing.CanHandle(url).Returns(true);
+        failing.ExtractAsync(url, Arg.Any<CancellationToken>())
+            .Returns(Result<MediaPayload, ExtractionError>.Failure(new ExtractionError.ContentUnavailable(url, "HTTP 400")));
+
+        var textOnly = Substitute.For<IPlatformExtractor>();
+        textOnly.CanHandle(url).Returns(true);
+        textOnly.ExtractAsync(url, Arg.Any<CancellationToken>())
+            .Returns(Result<MediaPayload, ExtractionError>.Success(textPayload));
+
+        IPlatformExtractor[] chain = failureFirst ? [failing, textOnly] : [textOnly, failing];
+        _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
+
+        var sut = new HandleIncomingMessageHandler(_urlExtractor, chain, _cache, _messenger, _metrics, _journal, _time, _logger);
+        await sut.HandleAsync(Message(), CancellationToken.None);
+
+        // The caption still goes out, but it is only what survived a broken media extractor — a
+        // dead session, say. Cached, it would keep answering with text after the session is fixed.
+        await _messenger.Received(1).ReplyWithTextAsync(123L, 7, textPayload, Arg.Any<CancellationToken>());
+        await _cache.DidNotReceiveWithAnyArgs().SaveAsync(default!, default!, default);
+    }
+
+    [Fact]
+    public async Task HandleAsync_TextFallbackAfterUnsupportedSkip_IsCached()
+    {
+        var url = new Uri("https://threads.com/@user/post/1");
+        var textPayload = new MediaPayload(url, null, "author", [], Description: "post body");
+
+        var disowning = Substitute.For<IPlatformExtractor>();
+        disowning.CanHandle(url).Returns(true);
+        disowning.ExtractAsync(url, Arg.Any<CancellationToken>())
+            .Returns(Result<MediaPayload, ExtractionError>.Failure(new ExtractionError.UnsupportedPlatform(url)));
+
+        var textOnly = Substitute.For<IPlatformExtractor>();
+        textOnly.CanHandle(url).Returns(true);
+        textOnly.ExtractAsync(url, Arg.Any<CancellationToken>())
+            .Returns(Result<MediaPayload, ExtractionError>.Success(textPayload));
+
+        _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
+
+        var sut = new HandleIncomingMessageHandler(_urlExtractor, [disowning, textOnly], _cache, _messenger, _metrics, _journal, _time, _logger);
+        await sut.HandleAsync(Message(), CancellationToken.None);
+
+        // An extractor that disowns the URL never tried, so it says nothing about the text being partial.
+        await _cache.Received(1).SaveAsync(textPayload, Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task HandleAsync_NoExtractorForUrl_DoesNotTouchCache()
     {
