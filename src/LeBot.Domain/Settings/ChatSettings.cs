@@ -20,11 +20,16 @@ namespace LeBot.Domain.Settings;
 /// Whether a link the bot tried and failed to fetch gets a 🤷 reaction instead of silence. Off by default:
 /// silence is the bot's rule, and this is a chat's opt-in exception to it.
 /// </param>
+/// <param name="WeeklyDigest">
+/// Whether the chat gets a Monday-morning summary of last week's links. Off by default: the bot speaks
+/// when spoken to, and a scheduled post is the one exception a chat has to ask for.
+/// </param>
 public sealed record ChatSettings(
     CaptionMode VideoCaption,
     CaptionMode PostCaption,
     bool OfferFullText = true,
-    bool ShrugOnFailure = false)
+    bool ShrugOnFailure = false,
+    bool WeeklyDigest = false)
 {
     /// <summary>What a chat gets before anyone has opened <c>/settings</c>.</summary>
     public static ChatSettings Default { get; } = new(CaptionMode.Off, CaptionMode.Full);

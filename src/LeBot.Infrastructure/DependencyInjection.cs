@@ -135,6 +135,7 @@ public static class DependencyInjection
         services.AddHostedService<RepostDatabaseInitializer>();
 
         services.AddHostedService<TelegramUpdateDispatcher>();
+        services.AddHostedService<WeeklyDigestService>();
         services.AddHostedService<DownloadsCleanupService>();
         services.AddHostedService<MediaCacheCleanupService>();
         services.AddHostedService<YtDlpUpdateService>();

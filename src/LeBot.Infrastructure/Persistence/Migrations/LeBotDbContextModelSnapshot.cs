@@ -85,6 +85,9 @@ namespace LeBot.Infrastructure.Persistence.Migrations
                     b.Property<string>("ChatHash")
                         .HasColumnType("TEXT");
 
+                    b.Property<long?>("ChatId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("OfferFullText")
                         .HasColumnType("INTEGER");
 
@@ -102,6 +105,9 @@ namespace LeBot.Infrastructure.Persistence.Migrations
                     b.Property<string>("VideoCaption")
                         .IsRequired()
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("WeeklyDigest")
+                        .HasColumnType("INTEGER");
 
                     b.HasKey("ChatHash");
 

@@ -104,6 +104,22 @@ internal sealed class SqliteRepostEventStore(
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyList<RepostRow>> GetRepostRowsAsync(
+        string chatHash,
+        DateTimeOffset since,
+        DateTimeOffset until,
+        CancellationToken cancellationToken)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        return await db.RepostEvents.AsNoTracking()
+            .Where(e => e.ChatHash == chatHash
+                && e.OccurredAt >= since
+                && e.OccurredAt < until
+                && (e.Outcome == RepostOutcome.MediaRepost || e.Outcome == RepostOutcome.TextFallback))
+            .Select(e => new RepostRow(e.SenderId, e.Host))
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyList<HostStat>> GetTopHostsByVolumeAsync(int limit, DateTimeOffset since, CancellationToken cancellationToken)
     {
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);

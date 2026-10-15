@@ -42,6 +42,12 @@ public interface IRepostEventStore
     Task<IReadOnlyList<SenderHostCount>> GetSenderHostCountsAsync(string chatHash, DateTimeOffset since, CancellationToken cancellationToken);
 
     /// <summary>
+    /// One chat's successful reposts (media or text) from <paramref name="since"/> up to, not including,
+    /// <paramref name="until"/> — the weekly digest's input. Every repost counts, known sender or not.
+    /// </summary>
+    Task<IReadOnlyList<RepostRow>> GetRepostRowsAsync(string chatHash, DateTimeOffset since, DateTimeOffset until, CancellationToken cancellationToken);
+
+    /// <summary>
     /// The <paramref name="limit"/> busiest hosts in the window, most events first.
     /// </summary>
     Task<IReadOnlyList<HostStat>> GetTopHostsByVolumeAsync(int limit, DateTimeOffset since, CancellationToken cancellationToken);

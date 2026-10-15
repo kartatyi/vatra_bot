@@ -57,6 +57,26 @@ public sealed class SqliteChatSettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task GetDigestChatIdsAsync_ListsOnlyChatsWithTheDigestOn()
+    {
+        await _sut.SaveAsync(-100123, ChatSettings.Default with { WeeklyDigest = true }, CancellationToken.None);
+        await _sut.SaveAsync(-100999, ChatSettings.Default, CancellationToken.None);
+
+        (await _sut.GetDigestChatIdsAsync(CancellationToken.None)).Should().Equal(-100123L);
+    }
+
+    [Fact]
+    public async Task SaveAsync_DigestTurnedOff_ForgetsTheRawChatId()
+    {
+        await _sut.SaveAsync(-100123, ChatSettings.Default with { WeeklyDigest = true }, CancellationToken.None);
+
+        await _sut.SaveAsync(-100123, ChatSettings.Default, CancellationToken.None);
+
+        (await _sut.GetDigestChatIdsAsync(CancellationToken.None)).Should().BeEmpty();
+        (await _sut.GetAsync(-100123, CancellationToken.None)).WeeklyDigest.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task SaveAsync_Twice_KeepsTheLatest()
     {
         await _sut.SaveAsync(-100123, new ChatSettings(CaptionMode.Brief, CaptionMode.Brief), CancellationToken.None);

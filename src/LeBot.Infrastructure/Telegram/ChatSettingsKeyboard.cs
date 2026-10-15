@@ -15,6 +15,7 @@ internal static class ChatSettingsKeyboard
     private const string PostKey = "p";
     private const string ButtonKey = "b";
     private const string ShrugKey = "s";
+    private const string DigestKey = "d";
     private const string On = "On";
     private const string Off = "Off";
     private const string Tick = "✅ ";
@@ -24,7 +25,8 @@ internal static class ChatSettingsKeyboard
         "🎬 Video — the text under TikToks, Reels, Shorts\n" +
         "📝 Post — the text of Threads, X, Reddit and photo posts\n" +
         "🔘 Button — a «" + RevealButton.Label + "» button under a repost whose text was hidden or cut\n" +
-        "🤷 Shrug — a 🤷 on a link the bot couldn't fetch\n\n" +
+        "🤷 Shrug — a 🤷 on a link the bot couldn't fetch\n" +
+        "📬 Digest — a Monday-morning summary of last week's links\n\n" +
         "Off: media only · Brief: no hashtags, a few lines · Full: as posted\n" +
         "Only group admins can change these.";
 
@@ -52,6 +54,10 @@ internal static class ChatSettingsKeyboard
             Button("🤷 Shrug on", ShrugKey, On, settings.ShrugOnFailure),
             Button("🤷 Shrug off", ShrugKey, Off, !settings.ShrugOnFailure),
         ],
+        [
+            Button("📬 Digest on", DigestKey, On, settings.WeeklyDigest),
+            Button("📬 Digest off", DigestKey, Off, !settings.WeeklyDigest),
+        ],
     ]);
 
     /// <summary>
@@ -74,16 +80,20 @@ internal static class ChatSettingsKeyboard
         }
 
         var (key, value) = (parts[0], parts[1]);
-        if (key is ButtonKey or ShrugKey)
+        if (key is ButtonKey or ShrugKey or DigestKey)
         {
             if (value is not (On or Off))
             {
                 return false;
             }
 
-            updated = key == ButtonKey
-                ? current with { OfferFullText = value == On }
-                : current with { ShrugOnFailure = value == On };
+            var on = value == On;
+            updated = key switch
+            {
+                ButtonKey => current with { OfferFullText = on },
+                ShrugKey => current with { ShrugOnFailure = on },
+                _ => current with { WeeklyDigest = on },
+            };
             return true;
         }
 
@@ -100,7 +110,7 @@ internal static class ChatSettingsKeyboard
                 updated = current with { VideoCaption = mode };
                 return true;
             case PostKey when mode != CaptionMode.Off:
-                updated = new ChatSettings(current.VideoCaption, mode, current.OfferFullText, current.ShrugOnFailure);
+                updated = new ChatSettings(current.VideoCaption, mode, current.OfferFullText, current.ShrugOnFailure, current.WeeklyDigest);
                 return true;
             default:
                 return false;

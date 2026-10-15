@@ -14,4 +14,7 @@ public interface IChatSettingsStore
 
     /// <summary>Replaces the chat's settings. Unlike <see cref="GetAsync"/>, a failure surfaces — the person changing them must not be told it worked.</summary>
     Task SaveAsync(long chatId, ChatSettings settings, CancellationToken cancellationToken);
+
+    /// <summary>The chats that turned the weekly digest on — by raw id, since the digest has to be sent to them.</summary>
+    Task<IReadOnlyList<long>> GetDigestChatIdsAsync(CancellationToken cancellationToken);
 }

@@ -18,5 +18,13 @@ internal sealed class ChatSettingsRow
 
     public bool ShrugOnFailure { get; set; }
 
+    public bool WeeklyDigest { get; set; }
+
+    /// <summary>
+    /// The raw chat id — held only while <see cref="WeeklyDigest"/> is on, because a scheduled post has to
+    /// know where to go and a pseudonym can't be sent to. Cleared the moment the digest is turned off.
+    /// </summary>
+    public long? ChatId { get; set; }
+
     public DateTimeOffset UpdatedAt { get; set; }
 }
