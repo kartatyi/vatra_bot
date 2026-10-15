@@ -17,7 +17,6 @@ internal static class InlineResults
     public const string OriginalButton = "🔗 Original";
     public const string FailedTitle = "🤷 Couldn't get media from this link";
     public const string WithoutTextDescription = "Without the post's text";
-    public const string TextOnlyTitle = "📝 Text only";
 
     internal const int CaptionLimit = 1024;
     internal const int TextLimit = 4096;
@@ -27,15 +26,13 @@ internal static class InlineResults
     private const int PreviewLength = 80;
 
     /// <summary>
-    /// Ready posts may be cached by Telegram for a while; "not ready" must not be, or the next keystroke
-    /// would be answered from Telegram's cache instead of reaching the finished preparation.
+    /// The results for <paramref name="answer"/>, and how long Telegram may cache them. Only a text-only post
+    /// is cached: every media choice is a placeholder the chosen-result path fills in, and "not ready" must
+    /// let the next keystroke reach the finished preparation.
     /// </summary>
     public static (IReadOnlyList<InlineQueryResult> Results, int CacheSeconds) For(InlineAnswer answer) => answer switch
     {
-        // Photo choices are placeholders, and a placeholder is filled in by the chosen-result path —
-        // a result Telegram served from its own cache wouldn't be, so they're not cached either.
-        InlineAnswer.Ready { Post: { HasMedia: true, Kind: MediaKind.Photo } } ready => (PhotoResults(ready.Post, ready.Url), 0),
-        InlineAnswer.Ready { Post.HasMedia: true } ready => (MediaResults(ready.Post), 300),
+        InlineAnswer.Ready { Post.HasMedia: true } ready => (MediaResults(ready.Post, ready.Url), 0),
         InlineAnswer.Ready ready => (TextResults(ready.Post), 300),
         InlineAnswer.NotReady notReady => (PendingResults(notReady.Url), 0),
         InlineAnswer.Failed failed => ([LinkArticle("failed", FailedTitle, failed.Url)], 0),
@@ -70,50 +67,30 @@ internal static class InlineResults
     }
 
     /// <summary>
-    /// A photo post's choices, as titled placeholders rather than photo results: clients show photo results
-    /// as bare thumbnails — no title, no description, in a grid or a list alike — so "photo" and "photo +
-    /// text" can't be told apart. Choosing one sends the placeholder, and the chosen-result path swaps the
-    /// stored photo into it straight away.
+    /// A media post's choices, as titled placeholders rather than media results: clients show photo and video
+    /// results as bare thumbnails — no title, no description — so "with text" and "without" can't be told
+    /// apart. Choosing one sends the placeholder, and the chosen-result path swaps the stored media into it
+    /// straight away: it's already in the storage chat. Two choices at most — the media, or the media with
+    /// the post's text.
     /// </summary>
-    private static List<InlineQueryResult> PhotoResults(PreparedPost post, Uri url)
+    private static List<InlineQueryResult> MediaResults(PreparedPost post, Uri url)
     {
+        var (label, labelWithText) = post.Kind switch
+        {
+            MediaKind.Photo => ("🖼 Photo", "🖼 Photo + text"),
+            MediaKind.Animation => ("🎞 GIF", "🎞 GIF + text"),
+            MediaKind.Audio => ("🎵 Audio", "🎵 Audio + text"),
+            _ => ("📹 Video", "📹 Video + text"),
+        };
+
         var content = new InputTextMessageContent($"{LoadingText}\n{url.AbsoluteUri}");
         List<InlineQueryResult> results =
         [
-            new InlineQueryResultArticle(PendingBareId, "🖼 Photo", content) { Description = WithoutTextDescription, ReplyMarkup = OriginalLink(url) },
+            new InlineQueryResultArticle(PendingBareId, label, content) { Description = WithoutTextDescription, ReplyMarkup = OriginalLink(url) },
         ];
         if (post.Body is { } body)
         {
-            results.Add(new InlineQueryResultArticle(PendingTextId, "🖼 Photo + text", content) { Description = Preview(body), ReplyMarkup = OriginalLink(url) });
-            results.Add(TextOnly(body));
-        }
-
-        return results;
-    }
-
-    /// <summary>
-    /// The bare file, and — when the post has text — the file with the text as its caption, plus the text on
-    /// its own. The text-only result is also what keeps the choices readable: clients lay out an all-photo
-    /// answer as a grid of thumbnails with no titles, so "photo" and "photo + text" would look identical;
-    /// one non-photo result switches them to a list that shows each title and description.
-    /// </summary>
-    private static List<InlineQueryResult> MediaResults(PreparedPost post)
-    {
-        // HasMedia guarantees both; the pattern just lets the compiler see it.
-        if (post is not { Kind: { } kind, FileId: { } fileId })
-        {
-            return [];
-        }
-
-        var (label, labelWithText) = kind == MediaKind.Photo
-            ? ("🖼 Photo", "🖼 Photo + text")
-            : ("📹 Video", "📹 Video + text");
-
-        List<InlineQueryResult> results = [Media("bare", kind, fileId, label, caption: null, WithoutTextDescription)];
-        if (post.Body is { } body)
-        {
-            results.Add(Media("text", kind, fileId, labelWithText, Fit(body, CaptionLimit), Preview(body)));
-            results.Add(TextOnly(body));
+            results.Add(new InlineQueryResultArticle(PendingTextId, labelWithText, content) { Description = Preview(body), ReplyMarkup = OriginalLink(url) });
         }
 
         return results;
@@ -123,17 +100,6 @@ internal static class InlineResults
         post.Body is { } body
             ? [new InlineQueryResultArticle("text", "📝 Text", new InputTextMessageContent(Fit(body, TextLimit))) { Description = Preview(body) }]
             : [];
-
-    private static InlineQueryResult Media(string id, MediaKind kind, string fileId, string title, string? caption, string? description) => kind switch
-    {
-        MediaKind.Photo => new InlineQueryResultCachedPhoto(id, fileId) { Title = title, Caption = caption, Description = description },
-        MediaKind.Animation => new InlineQueryResultCachedMpeg4Gif(id, fileId) { Title = title, Caption = caption },
-        MediaKind.Audio => new InlineQueryResultCachedAudio(id, fileId) { Caption = caption },
-        _ => new InlineQueryResultCachedVideo(id, fileId, title) { Caption = caption, Description = description },
-    };
-
-    private static InlineQueryResultArticle TextOnly(string body) =>
-        new("text-only", TextOnlyTitle, new InputTextMessageContent(Fit(body, TextLimit))) { Description = Preview(body) };
 
     /// <summary>Choosing it sends the link itself — in a chat with the bot, that still gets reposted.</summary>
     private static InlineQueryResultArticle LinkArticle(string id, string title, Uri url) =>
