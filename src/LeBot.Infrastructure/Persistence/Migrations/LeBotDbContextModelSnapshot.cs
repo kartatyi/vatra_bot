@@ -60,6 +60,9 @@ namespace LeBot.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<long?>("SenderId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Url")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -71,6 +74,8 @@ namespace LeBot.Infrastructure.Persistence.Migrations
                     b.HasIndex("OccurredAt");
 
                     b.HasIndex("Outcome");
+
+                    b.HasIndex("ChatHash", "SenderId");
 
                     b.ToTable("RepostEvents", (string)null);
                 });
@@ -121,6 +126,19 @@ namespace LeBot.Infrastructure.Persistence.Migrations
                     b.HasIndex("CreatedAt");
 
                     b.ToTable("RevealableTexts", (string)null);
+                });
+
+            modelBuilder.Entity("LeBot.Infrastructure.Persistence.StatsOptOutRow", b =>
+                {
+                    b.Property<string>("ChatHash")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("ChatHash", "UserId");
+
+                    b.ToTable("StatsOptOuts", (string)null);
                 });
 #pragma warning restore 612, 618
         }

@@ -84,6 +84,26 @@ internal sealed class SqliteRepostEventStore(
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyList<SenderHostCount>> GetSenderHostCountsAsync(
+        string chatHash,
+        DateTimeOffset since,
+        CancellationToken cancellationToken)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var optedOut = db.StatsOptOuts.Where(o => o.ChatHash == chatHash).Select(o => o.UserId);
+
+        return await db.RepostEvents.AsNoTracking()
+            .Where(e => e.ChatHash == chatHash
+                && e.OccurredAt >= since
+                && e.SenderId != null
+                && (e.Outcome == RepostOutcome.MediaRepost || e.Outcome == RepostOutcome.TextFallback)
+                && !optedOut.Contains(e.SenderId ?? 0))
+            // "?? 0" never fires — the filter above drops null senders — but keeps the key non-nullable.
+            .GroupBy(e => new { SenderId = e.SenderId ?? 0, e.Host })
+            .Select(g => new SenderHostCount(g.Key.SenderId, g.Key.Host, g.Count()))
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyList<HostStat>> GetTopHostsByVolumeAsync(int limit, DateTimeOffset since, CancellationToken cancellationToken)
     {
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);

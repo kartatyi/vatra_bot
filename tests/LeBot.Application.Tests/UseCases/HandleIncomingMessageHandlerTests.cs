@@ -34,7 +34,7 @@ public class HandleIncomingMessageHandlerTests
         new(_urlExtractor, [_extractor], _cache, _settings, _revealable, _messenger, _metrics, _journal, _time, _logger);
 
     private static IncomingMessage Message(string text = "hi") =>
-        new(ChatId: 123L, MessageId: 7, Text: text, SenderUsername: "user");
+        new(ChatId: 123L, MessageId: 7, Text: text, SenderUsername: "user", SenderId: 555L);
 
     [Fact]
     public async Task HandleAsync_NoUrls_DoesNothing()
@@ -416,7 +416,7 @@ public class HandleIncomingMessageHandlerTests
         // A served link is a repost the dashboard must count, or the failure rate reads high
         // for no reason. It is filed under MediaCache, not the extractor that never ran.
         await _journal.Received(1).RecordMediaRepostAsync(
-            url, "MediaCache", 1, 100, Arg.Any<TimeSpan>(), 123L, Arg.Any<CancellationToken>());
+            url, "MediaCache", 1, 100, Arg.Any<TimeSpan>(), 123L, 555L, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -433,7 +433,7 @@ public class HandleIncomingMessageHandlerTests
         await CreateSut().HandleAsync(Message(), CancellationToken.None);
 
         await _journal.Received(1).RecordTextFallbackAsync(
-            url, "MediaCache", Arg.Any<TimeSpan>(), 123L, Arg.Any<CancellationToken>());
+            url, "MediaCache", Arg.Any<TimeSpan>(), 123L, 555L, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -564,7 +564,7 @@ public class HandleIncomingMessageHandlerTests
 
         // The journal is the durable record behind the dashboard; one media item, 100 bytes, chat 123.
         await _journal.Received(1).RecordMediaRepostAsync(
-            url, Arg.Any<string>(), 1, 100, Arg.Any<TimeSpan>(), 123L, Arg.Any<CancellationToken>());
+            url, Arg.Any<string>(), 1, 100, Arg.Any<TimeSpan>(), 123L, 555L, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -583,7 +583,7 @@ public class HandleIncomingMessageHandlerTests
 
         // Unknown size must journal as null, not a misleading 0 — otherwise bandwidth stats undercount.
         await _journal.Received(1).RecordMediaRepostAsync(
-            url, Arg.Any<string>(), 1, null, Arg.Any<TimeSpan>(), 123L, Arg.Any<CancellationToken>());
+            url, Arg.Any<string>(), 1, null, Arg.Any<TimeSpan>(), 123L, 555L, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -617,7 +617,7 @@ public class HandleIncomingMessageHandlerTests
         await CreateSut().HandleAsync(Message(), CancellationToken.None);
 
         await _journal.Received(1).RecordTextFallbackAsync(
-            url, Arg.Any<string?>(), Arg.Any<TimeSpan>(), 123L, Arg.Any<CancellationToken>());
+            url, Arg.Any<string?>(), Arg.Any<TimeSpan>(), 123L, 555L, Arg.Any<CancellationToken>());
     }
 
     [Fact]

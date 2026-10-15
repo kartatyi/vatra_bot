@@ -59,6 +59,7 @@ public static class DependencyInjection
             dbOptions.UseSqlite(connectionString);
         });
         services.AddSingleton<IRepostEventStore, SqliteRepostEventStore>();
+        services.AddSingleton<IStatsOptOutStore, SqliteStatsOptOutStore>();
         services.AddSingleton<IChatSettingsStore, SqliteChatSettingsStore>();
         services.AddSingleton<IRevealableTextStore, SqliteRevealableTextStore>();
 

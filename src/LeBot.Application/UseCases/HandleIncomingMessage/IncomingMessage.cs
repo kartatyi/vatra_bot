@@ -9,8 +9,10 @@ namespace LeBot.Application.UseCases.HandleIncomingMessage;
 /// <param name="MessageId">Id of the original message; used to reply.</param>
 /// <param name="Text">The text payload; empty when the message had none.</param>
 /// <param name="SenderUsername">Sender's Telegram username, or <c>&lt;unknown&gt;</c> when missing.</param>
+/// <param name="SenderId">Sender's Telegram user id when the sender is a person; null for bots, anonymous admins and channel posts.</param>
 public sealed record IncomingMessage(
     long ChatId,
     int MessageId,
     string Text,
-    string SenderUsername);
+    string SenderUsername,
+    long? SenderId = null);

@@ -35,6 +35,13 @@ public interface IRepostEventStore
     Task<IReadOnlyList<RecentFailure>> GetRecentFailuresAsync(int limit, string? chatHash, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Successful reposts in one chat, counted per person and host, since <paramref name="since"/> —
+    /// the input to <see cref="Leaderboard.Rank"/>. Leaves out rows with no known sender and everyone
+    /// who opted out of that chat's ranking (see <see cref="IStatsOptOutStore"/>).
+    /// </summary>
+    Task<IReadOnlyList<SenderHostCount>> GetSenderHostCountsAsync(string chatHash, DateTimeOffset since, CancellationToken cancellationToken);
+
+    /// <summary>
     /// The <paramref name="limit"/> busiest hosts in the window, most events first.
     /// </summary>
     Task<IReadOnlyList<HostStat>> GetTopHostsByVolumeAsync(int limit, DateTimeOffset since, CancellationToken cancellationToken);

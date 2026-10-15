@@ -95,7 +95,7 @@ public sealed class HandleIncomingMessageHandler(
                     metrics.RecordMediaRepost(extractorName);
                     await journal.RecordMediaRepostAsync(
                         url, extractorName, ok.Value.Items.Count, TotalBytes(ok.Value),
-                        timeProvider.GetElapsedTime(startedAt), message.ChatId, cancellationToken);
+                        timeProvider.GetElapsedTime(startedAt), message.ChatId, message.SenderId, cancellationToken);
                     logger.LogInformation(
                         "Reposted {Count} media item(s) from {Url} via {Extractor} into chat {ChatId}",
                         ok.Value.Items.Count, url, extractorName, message.ChatId);
@@ -141,7 +141,7 @@ public sealed class HandleIncomingMessageHandler(
             metrics.RecordTextRepost(fallback.Extractor);
             await journal.RecordTextFallbackAsync(
                 url, fallback.Extractor,
-                timeProvider.GetElapsedTime(startedAt), message.ChatId, cancellationToken);
+                timeProvider.GetElapsedTime(startedAt), message.ChatId, message.SenderId, cancellationToken);
             logger.LogInformation(
                 "Reposted text body from {Url} into chat {ChatId}",
                 url, message.ChatId);
@@ -191,7 +191,7 @@ public sealed class HandleIncomingMessageHandler(
             metrics.RecordMediaRepost(cached.Extractor);
             await journal.RecordMediaRepostAsync(
                 url, CacheExtractorName, cached.Payload.Items.Count, TotalBytes(cached.Payload),
-                timeProvider.GetElapsedTime(startedAt), message.ChatId, cancellationToken);
+                timeProvider.GetElapsedTime(startedAt), message.ChatId, message.SenderId, cancellationToken);
         }
         else if (HasReplyableText(cached.Payload))
         {
@@ -199,7 +199,7 @@ public sealed class HandleIncomingMessageHandler(
             metrics.RecordTextRepost(cached.Extractor);
             await journal.RecordTextFallbackAsync(
                 url, CacheExtractorName,
-                timeProvider.GetElapsedTime(startedAt), message.ChatId, cancellationToken);
+                timeProvider.GetElapsedTime(startedAt), message.ChatId, message.SenderId, cancellationToken);
         }
         else
         {
