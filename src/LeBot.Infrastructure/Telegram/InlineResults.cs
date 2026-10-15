@@ -16,6 +16,8 @@ internal static class InlineResults
     public const string LoadingText = "⏳ Loading the media…";
     public const string OriginalButton = "🔗 Original";
     public const string FailedTitle = "🤷 Couldn't get media from this link";
+    public const string WithoutTextDescription = "Without the post's text";
+    public const string TextOnlyTitle = "📝 Text only";
 
     internal const int CaptionLimit = 1024;
     internal const int TextLimit = 4096;
@@ -64,7 +66,12 @@ internal static class InlineResults
         ];
     }
 
-    /// <summary>The bare file, and — when the post has text — the file with the text as its caption.</summary>
+    /// <summary>
+    /// The bare file, and — when the post has text — the file with the text as its caption, plus the text on
+    /// its own. The text-only result is also what keeps the choices readable: clients lay out an all-photo
+    /// answer as a grid of thumbnails with no titles, so "photo" and "photo + text" would look identical;
+    /// one non-photo result switches them to a list that shows each title and description.
+    /// </summary>
     private static List<InlineQueryResult> MediaResults(PreparedPost post)
     {
         // HasMedia guarantees both; the pattern just lets the compiler see it.
@@ -77,10 +84,14 @@ internal static class InlineResults
             ? ("🖼 Photo", "🖼 Photo + text")
             : ("📹 Video", "📹 Video + text");
 
-        List<InlineQueryResult> results = [Media("bare", kind, fileId, label, caption: null, description: null)];
+        List<InlineQueryResult> results = [Media("bare", kind, fileId, label, caption: null, WithoutTextDescription)];
         if (post.Body is { } body)
         {
             results.Add(Media("text", kind, fileId, labelWithText, Fit(body, CaptionLimit), Preview(body)));
+            results.Add(new InlineQueryResultArticle("text-only", TextOnlyTitle, new InputTextMessageContent(Fit(body, TextLimit)))
+            {
+                Description = Preview(body),
+            });
         }
 
         return results;

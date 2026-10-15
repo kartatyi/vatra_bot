@@ -14,11 +14,14 @@ public class InlineResultsTests
     {
         var (results, cache) = InlineResults.For(new InlineAnswer.Ready(new PreparedPost(MediaKind.Video, "f", "the post")));
 
-        results.Should().HaveCount(2);
+        results.Should().HaveCount(3);
         var bare = results[0].Should().BeOfType<InlineQueryResultCachedVideo>().Subject;
         var captioned = results[1].Should().BeOfType<InlineQueryResultCachedVideo>().Subject;
-        (bare.Title, bare.Caption, bare.VideoFileId).Should().Be(("📹 Video", null, "f"));
+        var textOnly = results[2].Should().BeOfType<InlineQueryResultArticle>().Subject;
+        (bare.Title, bare.Caption, bare.VideoFileId, bare.Description).Should().Be(("📹 Video", null, "f", InlineResults.WithoutTextDescription));
         (captioned.Title, captioned.Caption).Should().Be(("📹 Video + text", "the post"));
+        textOnly.Title.Should().Be(InlineResults.TextOnlyTitle);
+        textOnly.InputMessageContent.Should().BeOfType<InputTextMessageContent>().Which.MessageText.Should().Be("the post");
         cache.Should().BePositive();
     }
 
@@ -35,8 +38,9 @@ public class InlineResultsTests
     {
         var (results, _) = InlineResults.For(new InlineAnswer.Ready(new PreparedPost(MediaKind.Photo, "p", "listing")));
 
-        results.Should().AllBeOfType<InlineQueryResultCachedPhoto>();
-        results.Cast<InlineQueryResultCachedPhoto>().Select(r => r.Title).Should().Equal("🖼 Photo", "🖼 Photo + text");
+        // Not all photos: the text-only article is what makes clients list the choices instead of a title-less grid.
+        results.Should().NotBeEmpty().And.Contain(r => r is InlineQueryResultArticle);
+        results.OfType<InlineQueryResultCachedPhoto>().Select(r => r.Title).Should().Equal("🖼 Photo", "🖼 Photo + text");
     }
 
     [Fact]
