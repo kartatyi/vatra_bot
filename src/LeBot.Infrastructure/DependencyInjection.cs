@@ -36,6 +36,7 @@ public static class DependencyInjection
         services.Configure<TelegramOptions>(configuration.GetSection(TelegramOptions.SectionName));
         services.Configure<YtDlpOptions>(configuration.GetSection(YtDlpOptions.SectionName));
         services.Configure<UpdateOptions>(configuration.GetSection(UpdateOptions.SectionName));
+        services.Configure<FeedbackOptions>(configuration.GetSection(FeedbackOptions.SectionName));
         services.Configure<ThreadsOptions>(configuration.GetSection(ThreadsOptions.SectionName));
         services.Configure<MediaCacheOptions>(configuration.GetSection(MediaCacheOptions.SectionName));
         services.Configure<TelemetryOptions>(configuration.GetSection(TelemetryOptions.SectionName));
@@ -134,6 +135,7 @@ public static class DependencyInjection
         // to record itself.
         services.AddHostedService<RepostDatabaseInitializer>();
 
+        services.AddSingleton<FeedbackRelay>();
         services.AddHostedService<TelegramUpdateDispatcher>();
         services.AddHostedService<WeeklyDigestService>();
         services.AddHostedService<DownloadsCleanupService>();
