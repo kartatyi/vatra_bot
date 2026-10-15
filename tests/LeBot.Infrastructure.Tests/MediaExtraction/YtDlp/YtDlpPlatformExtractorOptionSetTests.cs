@@ -7,11 +7,12 @@ namespace LeBot.Infrastructure.Tests.MediaExtraction.YtDlp;
 
 public class YtDlpPlatformExtractorOptionSetTests
 {
-    private static YtDlpPlatformExtractor CreateSut()
+    private static YtDlpPlatformExtractor CreateSut(string jsRuntimePath = "no-such-dir/deno.exe")
     {
         var options = Options.Create(new YtDlpOptions
         {
             DownloadDirectory = Path.GetTempPath(),
+            JsRuntimePath = jsRuntimePath,
         });
         return new YtDlpPlatformExtractor(options, NullLogger<YtDlpPlatformExtractor>.Instance);
     }
@@ -26,5 +27,31 @@ public class YtDlpPlatformExtractorOptionSetTests
         var optionSet = CreateSut().BuildOptionSet();
 
         optionSet.FormatSort.Should().Be("vcodec:h264");
+    }
+
+    [Fact]
+    public void BuildOptionSet_DenoPresent_PassesItAsJsRuntime()
+    {
+        var deno = Path.Combine(Path.GetTempPath(), $"deno-{Environment.ProcessId}.exe");
+        File.WriteAllBytes(deno, []);
+
+        try
+        {
+            var args = CreateSut(deno).BuildOptionSet().GetOptionFlags().ToList();
+
+            args.Should().Contain($"--js-runtimes \"deno:{deno}\"");
+        }
+        finally
+        {
+            File.Delete(deno);
+        }
+    }
+
+    [Fact]
+    public void BuildOptionSet_DenoMissing_LeavesJsRuntimeUnset()
+    {
+        var args = CreateSut().BuildOptionSet().GetOptionFlags();
+
+        args.Should().NotContain(flag => flag.StartsWith("--js-runtimes"));
     }
 }

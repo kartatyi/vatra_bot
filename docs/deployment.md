@@ -57,6 +57,7 @@ C:\LeBot\
   tools\
     yt-dlp\
       yt-dlp.exe
+      deno.exe          # JS runtime for YouTube's player challenge — without it YouTube downloads 403
       ffmpeg.exe        # optional, only required if you want max-quality DASH merges
   downloads\            # created on first run, beside the exe; files >1h old swept every 30 min
   cache\                # created on first run; one folder per link, kept 24h, capped at 2 GB
@@ -325,7 +326,7 @@ Copy-Item publish\LeBot.Host.exe, publish\LeBot.Dashboard.exe, publish\appsettin
 ```powershell
 pwsh tools/fetch-tools.ps1
 New-Item -ItemType Directory -Force D:\lebot\tools\yt-dlp | Out-Null
-Copy-Item tools\yt-dlp\yt-dlp.exe D:\lebot\tools\yt-dlp\
+Copy-Item tools\yt-dlp\yt-dlp.exe, tools\yt-dlp\deno.exe D:\lebot\tools\yt-dlp\
 ```
 
 **3. Use a SEPARATE test bot token — this is the trap.** Telegram allows only **one** long-poller per token. If you start a local bot with the *same* token the homesrv production bot is using, both poll at once and Telegram answers `409 Conflict` — neither works reliably. So either:

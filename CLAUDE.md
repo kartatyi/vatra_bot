@@ -177,6 +177,7 @@ yt-dlp knobs ([`YtDlpOptions`](src/LeBot.Infrastructure/Configuration/YtDlpOptio
   "BinaryPath": "tools/yt-dlp/yt-dlp.exe",  // fetched by tools/fetch-tools.ps1, not committed
   "CookiesFromBrowser": null,               // "firefox" | "chrome" | … → reaches login-gated IG/X content
   "FfmpegPath": null,                        // only for formats yt-dlp must merge/transcode
+  "JsRuntimePath": "tools/yt-dlp/deno.exe",  // fetched beside yt-dlp; absent → every YouTube download 403s
   "MaxFileSizeMb": 50                        // skip above Telegram's upload ceiling
 }
 ```
