@@ -118,6 +118,9 @@ namespace LeBot.Infrastructure.Persistence.Migrations
                     b.Property<bool>("ShrugOnFailure")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("StatsOff")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("UpdatedAt")
                         .IsRequired()
                         .HasColumnType("TEXT");

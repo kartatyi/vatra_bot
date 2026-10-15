@@ -33,7 +33,13 @@ public sealed class WeeklyDigestPlanner(
 
             var previous = (await events.GetRepostRowsAsync(chatHash, weekBefore, from, cancellationToken)).Count;
             var optedOut = await optOuts.GetOptedOutAsync(chatId, cancellationToken);
-            due.Add((chatId, Build(monday, sunday, week, previous, optedOut)));
+            var digest = Build(monday, sunday, week, previous, optedOut);
+            if (!(await settings.GetAsync(chatId, cancellationToken)).KeepStats)
+            {
+                digest = digest with { TopDroppers = [] }; // no names where the chat said no stats
+            }
+
+            due.Add((chatId, digest));
         }
 
         return due;

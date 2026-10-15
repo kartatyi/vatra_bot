@@ -14,6 +14,9 @@ public class DigestTests
     private readonly IRepostEventStore _events = Substitute.For<IRepostEventStore>();
     private readonly IStatsOptOutStore _optOuts = Substitute.For<IStatsOptOutStore>();
 
+    public DigestTests() =>
+        _settings.GetAsync(Arg.Any<long>(), Arg.Any<CancellationToken>()).Returns(LeBot.Domain.Settings.ChatSettings.Default);
+
     [Theory]
     [InlineData("2026-10-11T12:00:00+03:00", "2026-10-12T10:00:00+03:00")] // Sunday → the next morning
     [InlineData("2026-10-12T09:59:00+03:00", "2026-10-12T10:00:00+03:00")] // Monday, just before
@@ -68,6 +71,22 @@ public class DigestTests
             .PlanAsync(At("2026-10-12T10:00:00+03:00"), CancellationToken.None);
 
         due.Select(d => d.ChatId).Should().Equal(-1L);
+    }
+
+    [Fact]
+    public async Task PlanAsync_StatsOff_NamesNobody()
+    {
+        _settings.GetDigestChatIdsAsync(Arg.Any<CancellationToken>()).Returns([-1L]);
+        _settings.GetAsync(-1L, Arg.Any<CancellationToken>()).Returns(LeBot.Domain.Settings.ChatSettings.Default with { KeepStats = false });
+        _events.GetRepostRowsAsync(ChatHasher.Of(-1), Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns([new RepostRow(1, "x.com")]);
+        _optOuts.GetOptedOutAsync(Arg.Any<long>(), Arg.Any<CancellationToken>()).Returns(new HashSet<long>());
+
+        var due = await new WeeklyDigestPlanner(_settings, _events, _optOuts, Plus3)
+            .PlanAsync(At("2026-10-12T10:00:00+03:00"), CancellationToken.None);
+
+        due.Single().Digest.TopDroppers.Should().BeEmpty();
+        due.Single().Digest.Reposts.Should().Be(1);
     }
 
     private static DateTimeOffset At(string instant) => DateTimeOffset.Parse(instant, CultureInfo.InvariantCulture);

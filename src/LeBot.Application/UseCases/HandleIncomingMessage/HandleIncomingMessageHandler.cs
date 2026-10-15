@@ -43,6 +43,12 @@ public sealed class HandleIncomingMessageHandler(
         }
 
         var settings = await settingsStore.GetAsync(message.ChatId, cancellationToken);
+        if (!settings.KeepStats)
+        {
+            // A chat that turned stats off is never told apart by person: drop the sender before anything
+            // is recorded, so neither the journal nor the link sightings ever learn who posted what.
+            message = message with { SenderId = null };
+        }
         foreach (var url in urls)
         {
             cancellationToken.ThrowIfCancellationRequested();

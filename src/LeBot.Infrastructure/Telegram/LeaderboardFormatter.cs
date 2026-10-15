@@ -24,6 +24,10 @@ internal static class LeaderboardFormatter
         "Готово — тебе прибрано з рейтингу цього чату. /leaders optin поверне.",
         "Done — you're out of the ranking in this chat. /leaders optin brings you back.");
 
+    public static string StatsOff(BotLanguage lang) => lang.Pick(
+        "Статистику в цьому чаті вимкнено — увімкнути можна в /settings.",
+        "Stats are off in this chat — /settings turns them on.");
+
     public static string OptedIn(BotLanguage lang) => lang.Pick("Ти знову в рейтингу.", "You're back in the ranking.");
 
     public static string NoSender(BotLanguage lang) => lang.Pick(

@@ -39,6 +39,10 @@ Three badges, each held by the one person leading its category in the window —
 
 To count ⚡ and 🥱, the per-chat "seen links" table became `LinkSightings`: one row per time a chat saw a link, with who posted it and whether it was a repeat. **This widens what is recorded:** sightings carry a sender for every link the bot considered — including ones that weren't reposted, such as a news link it skipped. The link itself is still only the media cache's key digest, never a URL, and opt-outs are excluded in SQL from every badge query.
 
+### A chat can say no to stats (added 2026-10-15)
+
+`/settings` has a `📊 Stats` row, on by default. Off, the handler drops the sender before anything is recorded — the journal and the link sightings get no `SenderId` for that chat — and `/leaders`, `/me` and the digest's top droppers go quiet. Counts that identify nobody (`/stats`, `/top`) carry on. Turning it off hides and stops; it doesn't erase what was recorded before — that would be irreversible, and isn't what a toggle should do.
+
 ## Consequences
 
 - The ranking starts empty: rows from before this change have no sender.
