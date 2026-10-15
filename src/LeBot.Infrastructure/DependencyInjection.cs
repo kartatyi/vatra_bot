@@ -59,6 +59,7 @@ public static class DependencyInjection
             dbOptions.UseSqlite(connectionString);
         });
         services.AddSingleton<IRepostEventStore, SqliteRepostEventStore>();
+        services.AddSingleton<ISeenLinkStore, SqliteSeenLinkStore>();
 
         services.AddSingleton<ITelegramBotClient>(sp =>
         {

@@ -36,11 +36,22 @@ public interface ITelegramMessenger
     IAsyncDisposable IndicateBusy(long chatId, BusyKind kind);
 
     /// <summary>
-    /// Puts a "working on it" reaction on the message <paramref name="messageId"/>; disposing the handle
-    /// takes it off again. Best-effort: when the chat doesn't allow the reaction, nothing shows and
-    /// nothing throws.
+    /// Sets the bot's reaction on the message <paramref name="messageId"/>, replacing any it set before;
+    /// <see langword="null"/> takes it off. A message carries one bot reaction at a time, so callers
+    /// settle on the final one. Best-effort: when the chat doesn't allow the reaction, nothing shows
+    /// and nothing throws.
     /// </summary>
-    Task<IAsyncDisposable> MarkWorkingAsync(long chatId, int messageId, CancellationToken cancellationToken);
+    Task SetReactionAsync(long chatId, int messageId, LinkReaction? reaction, CancellationToken cancellationToken);
+}
+
+/// <summary>What the bot's reaction on a message with a link says.</summary>
+public enum LinkReaction
+{
+    /// <summary>Seen it, working on it — while extraction and upload run.</summary>
+    Working,
+
+    /// <summary>This chat has seen the link before.</summary>
+    Repeat,
 }
 
 /// <summary>

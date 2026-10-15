@@ -108,8 +108,28 @@ public sealed class TelegramBotMessenger(
             cancellationToken: ct), cancellationToken);
     }
 
-    public async Task<IAsyncDisposable> MarkWorkingAsync(long chatId, int messageId, CancellationToken cancellationToken) =>
-        await TelegramWorkingReaction.PlaceAsync(bot, chatId, messageId, logger, cancellationToken);
+    public async Task SetReactionAsync(long chatId, int messageId, LinkReaction? reaction, CancellationToken cancellationToken)
+    {
+        // An empty list is how the Bot API takes the bot's reaction off.
+        ReactionType[] reactions = reaction is { } r ? [new ReactionTypeEmoji { Emoji = EmojiFor(r) }] : [];
+        try
+        {
+            await bot.SetMessageReaction(chatId, messageId, reactions, cancellationToken: cancellationToken);
+        }
+        catch (RequestException ex)
+        {
+            // Cosmetic: a chat can restrict which reactions are allowed, and that must never cost the repost.
+            logger.LogDebug(ex, "Could not set reaction {Reaction} in chat {ChatId}", reaction, chatId);
+        }
+    }
+
+    /// <summary>The emoji behind each reaction — all from the set Telegram lets bots react with.</summary>
+    internal static string EmojiFor(LinkReaction reaction) => reaction switch
+    {
+        LinkReaction.Working => "👀",
+        LinkReaction.Repeat => "🥱",
+        _ => throw new ArgumentOutOfRangeException(nameof(reaction), reaction, "Unknown reaction."),
+    };
 
     public IAsyncDisposable IndicateBusy(long chatId, BusyKind kind)
     {

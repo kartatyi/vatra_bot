@@ -14,6 +14,8 @@ public sealed class LeBotDbContext(DbContextOptions<LeBotDbContext> options) : D
 {
     public DbSet<RepostEvent> RepostEvents => Set<RepostEvent>();
 
+    internal DbSet<SeenLinkRow> SeenLinks => Set<SeenLinkRow>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         var repostEvent = modelBuilder.Entity<RepostEvent>();
@@ -49,5 +51,14 @@ public sealed class LeBotDbContext(DbContextOptions<LeBotDbContext> options) : D
         repostEvent.HasIndex(e => e.OccurredAt);
         repostEvent.HasIndex(e => e.Host);
         repostEvent.HasIndex(e => e.Outcome);
+
+        var seenLink = modelBuilder.Entity<SeenLinkRow>();
+        seenLink.ToTable("SeenLinks");
+        seenLink.HasKey(s => new { s.ChatHash, s.LinkKey });
+        seenLink.Property(s => s.FirstSeenAt)
+            .HasConversion(
+                value => value.ToUniversalTime().ToString(occurredAtFormat, CultureInfo.InvariantCulture),
+                stored => DateTimeOffset.Parse(stored, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind))
+            .IsRequired();
     }
 }

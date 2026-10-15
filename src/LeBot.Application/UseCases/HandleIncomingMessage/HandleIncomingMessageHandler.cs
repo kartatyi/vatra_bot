@@ -16,6 +16,7 @@ public sealed class HandleIncomingMessageHandler(
     IUrlExtractor urlExtractor,
     IEnumerable<IPlatformExtractor> extractors,
     IMediaCache cache,
+    ISeenLinkStore seenLinks,
     ITelegramMessenger messenger,
     RepostMetrics metrics,
     IRepostJournal journal,
@@ -66,15 +67,46 @@ public sealed class HandleIncomingMessageHandler(
 
         // Ask the cache before any extractor runs: a link the chat has already seen is answered
         // from disk without a single request to the platform.
+        // Whether this chat has seen the link before is settled first, so the answer can't depend on
+        // whether the repost below works out.
+        var isRepeat = await seenLinks.MarkSeenAsync(message.ChatId, url, cancellationToken);
+        LinkReaction? settled = isRepeat ? LinkReaction.Repeat : null;
+
         if (await TryServeFromCacheAsync(message, url, startedAt, cancellationToken))
         {
+            if (settled is { } reaction)
+            {
+                await messenger.SetReactionAsync(message.ChatId, message.MessageId, reaction, cancellationToken);
+            }
+
             return;
         }
 
         // From here on it can take a while — mark the link itself, which is harder to miss than the
         // header status. A cache hit (above) answers too fast to need it.
-        await using var working = await messenger.MarkWorkingAsync(message.ChatId, message.MessageId, cancellationToken);
+        await messenger.SetReactionAsync(message.ChatId, message.MessageId, LinkReaction.Working, cancellationToken);
+        try
+        {
+            await ExtractAndReplyAsync(message, url, candidates, startedAt, cancellationToken);
+        }
+        finally
+        {
+            // No token: the working mark has to come off even when the work was cancelled.
+            await messenger.SetReactionAsync(message.ChatId, message.MessageId, settled, CancellationToken.None);
+        }
+    }
 
+    /// <summary>
+    /// Runs the extractor chain for a cache miss and replies with the first thing worth sending —
+    /// media, else text — or stays silent. Every outcome is journalled.
+    /// </summary>
+    private async Task ExtractAndReplyAsync(
+        IncomingMessage message,
+        Uri url,
+        IReadOnlyList<IPlatformExtractor> candidates,
+        long startedAt,
+        CancellationToken cancellationToken)
+    {
         (MediaPayload Payload, string Extractor)? textFallback = null;
         var sawSubstantiveAttempt = false;
 
