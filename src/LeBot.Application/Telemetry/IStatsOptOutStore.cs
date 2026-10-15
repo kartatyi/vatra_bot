@@ -8,4 +8,7 @@ public interface IStatsOptOutStore
 {
     /// <summary>Records that <paramref name="userId"/> is out of (or back in) the ranking of <paramref name="chatId"/>. Idempotent.</summary>
     Task SetOptedOutAsync(long chatId, long userId, bool optedOut, CancellationToken cancellationToken);
+
+    /// <summary>Whether <paramref name="userId"/> is out of the ranking of <paramref name="chatId"/>.</summary>
+    Task<bool> IsOptedOutAsync(long chatId, long userId, CancellationToken cancellationToken);
 }

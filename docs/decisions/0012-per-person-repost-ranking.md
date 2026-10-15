@@ -27,6 +27,18 @@ It is the raw id, not a `ChatHasher`-style pseudonym. The ranking has to ask Tel
 
 Per chat, the last 30 days by default or all time with `/leaders all`: up to ten people by successful reposts, each with the platform most of their links came from. Hosts fold into platforms (`vt.tiktok.com` and `tiktok.com` are both TikTok) before the favourite is picked.
 
+### Badges and `/me` (added 2026-10-15)
+
+Three badges, each held by the one person leading its category in the window — a tie goes to whoever ranks higher, and a category nobody scores in awards nothing:
+
+- ⚡ **first to bring it** — most links they posted first that *someone else* posted again later. Re-posting your own link is an echo, not a trend.
+- 🦉 **night owl** — most reposts between 00:00 and 05:00 in `Stats:TimeZone` (Kyiv by default; UTC would put a Kyiv 01:00 at 22:00).
+- 🥱 **repeat king** — most links posted that the chat had already seen.
+
+`/me` shows one person their own card: links, place in the ranking, favourite platform, busiest local hour, and their ⚡/🥱 tallies. Someone who opted out gets a pointer to `/leaders optin` instead — opting out hides you from yourself too, rather than half-hiding you.
+
+To count ⚡ and 🥱, the per-chat "seen links" table became `LinkSightings`: one row per time a chat saw a link, with who posted it and whether it was a repeat. **This widens what is recorded:** sightings carry a sender for every link the bot considered — including ones that weren't reposted, such as a news link it skipped. The link itself is still only the media cache's key digest, never a URL, and opt-outs are excluded in SQL from every badge query.
+
 ## Consequences
 
 - The ranking starts empty: rows from before this change have no sender.

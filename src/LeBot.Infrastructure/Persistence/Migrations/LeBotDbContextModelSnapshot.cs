@@ -108,6 +108,39 @@ namespace LeBot.Infrastructure.Persistence.Migrations
                     b.ToTable("ChatSettings", (string)null);
                 });
 
+            modelBuilder.Entity("LeBot.Infrastructure.Persistence.LinkSightingRow", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ChatHash")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsRepeat")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LinkKey")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SeenAt")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("SenderId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChatHash", "LinkKey");
+
+                    b.HasIndex("ChatHash", "SenderId");
+
+                    b.ToTable("LinkSightings", (string)null);
+                });
+
             modelBuilder.Entity("LeBot.Infrastructure.Persistence.PreparedPostRow", b =>
                 {
                     b.Property<string>("LinkKey")
@@ -152,23 +185,6 @@ namespace LeBot.Infrastructure.Persistence.Migrations
                     b.HasIndex("CreatedAt");
 
                     b.ToTable("RevealableTexts", (string)null);
-                });
-
-            modelBuilder.Entity("LeBot.Infrastructure.Persistence.SeenLinkRow", b =>
-                {
-                    b.Property<string>("ChatHash")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("LinkKey")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("FirstSeenAt")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("ChatHash", "LinkKey");
-
-                    b.ToTable("SeenLinks", (string)null);
                 });
 
             modelBuilder.Entity("LeBot.Infrastructure.Persistence.StatsOptOutRow", b =>

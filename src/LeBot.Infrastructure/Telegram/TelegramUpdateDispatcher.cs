@@ -29,6 +29,7 @@ public sealed class TelegramUpdateDispatcher(
     RepostMetrics metrics,
     IRepostEventStore eventStore,
     IStatsOptOutStore optOuts,
+    PersonStats personStats,
     IChatSettingsStore settingsStore,
     IRevealableTextStore revealableTexts,
     IAppVersion appVersion,
@@ -222,6 +223,9 @@ public sealed class TelegramUpdateDispatcher(
             case "leaders":
                 await ReplyAsync(message, await BuildLeadersAsync(message, argument, cancellationToken), cancellationToken);
                 return true;
+            case "me":
+                await ReplyAsync(message, await BuildMeAsync(message, argument, cancellationToken), cancellationToken);
+                return true;
             case "settings":
                 var settings = await settingsStore.GetAsync(message.Chat.Id, cancellationToken);
                 await ReplyAsync(message, ChatSettingsKeyboard.Text, cancellationToken, ChatSettingsKeyboard.Markup(settings));
@@ -387,13 +391,12 @@ public sealed class TelegramUpdateDispatcher(
         }
 
         var allTime = option == "all";
-        var since = allTime ? DateTimeOffset.MinValue : timeProvider.GetUtcNow() - LeadersWindow;
-        var rows = await eventStore.GetSenderHostCountsAsync(ChatHasher.Of(message.Chat.Id), since, cancellationToken);
+        var (ranked, badges) = await personStats.GetRankingAsync(message.Chat.Id, WindowStart(allTime), cancellationToken);
 
         // Names are asked of Telegram now rather than stored: the journal keeps only ids, a renamed person
         // shows their current name, and someone who left the chat drops out of the ranking.
-        var ranking = new List<(string Name, LeaderboardEntry Entry)>();
-        foreach (var entry in Leaderboard.Rank(rows, LeadersCandidates))
+        var ranking = new List<(string Name, LeaderboardEntry Entry, IReadOnlyList<Badge> Badges)>();
+        foreach (var entry in ranked.Take(LeadersCandidates))
         {
             if (ranking.Count == LeadersShown)
             {
@@ -402,12 +405,33 @@ public sealed class TelegramUpdateDispatcher(
 
             if (await TryGetMemberNameAsync(message.Chat.Id, entry.SenderId, cancellationToken) is { } name)
             {
-                ranking.Add((name, entry));
+                ranking.Add((name, entry, badges.GetValueOrDefault(entry.SenderId, [])));
             }
         }
 
         return LeaderboardFormatter.Format(ranking, allTime);
     }
+
+    private async Task<string> BuildMeAsync(Message message, string? argument, CancellationToken cancellationToken)
+    {
+        if (message.From is not { IsBot: false } sender)
+        {
+            return LeaderboardFormatter.NoSender;
+        }
+
+        if (await optOuts.IsOptedOutAsync(message.Chat.Id, sender.Id, cancellationToken))
+        {
+            return LeaderboardFormatter.MeOptedOut;
+        }
+
+        var allTime = argument?.Trim().ToLowerInvariant() == "all";
+        var stats = await personStats.GetPersonalAsync(message.Chat.Id, sender.Id, WindowStart(allTime), cancellationToken);
+        var name = string.IsNullOrWhiteSpace(sender.LastName) ? sender.FirstName : $"{sender.FirstName} {sender.LastName}";
+        return LeaderboardFormatter.FormatMe(name, stats, allTime);
+    }
+
+    private DateTimeOffset WindowStart(bool allTime) =>
+        allTime ? DateTimeOffset.MinValue : timeProvider.GetUtcNow() - LeadersWindow;
 
     /// <summary>The member's current display name, or <see langword="null"/> when they're no longer in the chat.</summary>
     private async Task<string?> TryGetMemberNameAsync(long chatId, long userId, CancellationToken cancellationToken)

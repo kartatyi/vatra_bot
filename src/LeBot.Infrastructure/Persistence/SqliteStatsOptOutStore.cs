@@ -27,4 +27,11 @@ internal sealed class SqliteStatsOptOutStore(IDbContextFactory<LeBotDbContext> c
 
         await db.SaveChangesAsync(cancellationToken);
     }
+
+    public async Task<bool> IsOptedOutAsync(long chatId, long userId, CancellationToken cancellationToken)
+    {
+        var chatHash = ChatHasher.Of(chatId);
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        return await db.StatsOptOuts.AnyAsync(o => o.ChatHash == chatHash && o.UserId == userId, cancellationToken);
+    }
 }

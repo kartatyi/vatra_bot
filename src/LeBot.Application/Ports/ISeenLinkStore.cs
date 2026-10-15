@@ -9,5 +9,6 @@ public interface ISeenLinkStore
     /// <b>Never throws on a storage failure</b> — it answers <see langword="false"/>: a missed repeat is
     /// harmless, a broken repost is not.
     /// </summary>
-    Task<bool> MarkSeenAsync(long chatId, Uri url, CancellationToken cancellationToken);
+    /// <param name="senderId">Who posted it, when a person did — what the ⚡ and 🥱 badges are counted from.</param>
+    Task<bool> MarkSeenAsync(long chatId, Uri url, long? senderId, CancellationToken cancellationToken);
 }

@@ -85,11 +85,22 @@ public class HandleIncomingMessageHandlerTests
     }
 
     [Fact]
+    public async Task HandleAsync_RecordsWhoPostedTheLink()
+    {
+        var url = new Uri("https://example.com/x");
+        ArrangeExtraction(url, VideoPayload(url));
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        await _seenLinks.Received(1).MarkSeenAsync(123L, url, 555L, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task HandleAsync_RepeatLink_SettlesOnTheRepeatReaction()
     {
         var url = new Uri("https://example.com/x");
         ArrangeExtraction(url, VideoPayload(url));
-        _seenLinks.MarkSeenAsync(123L, url, Arg.Any<CancellationToken>()).Returns(true);
+        _seenLinks.MarkSeenAsync(123L, url, Arg.Any<long?>(), Arg.Any<CancellationToken>()).Returns(true);
 
         await CreateSut().HandleAsync(Message(), CancellationToken.None);
 
@@ -159,7 +170,7 @@ public class HandleIncomingMessageHandlerTests
         _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
         _extractor.CanHandle(url).Returns(true);
         _cache.TryGetAsync(url, Arg.Any<CancellationToken>()).Returns(new CachedRepost(stored, "YtDlpPlatformExtractor"));
-        _seenLinks.MarkSeenAsync(123L, url, Arg.Any<CancellationToken>()).Returns(true);
+        _seenLinks.MarkSeenAsync(123L, url, Arg.Any<long?>(), Arg.Any<CancellationToken>()).Returns(true);
 
         await CreateSut().HandleAsync(Message(), CancellationToken.None);
 
