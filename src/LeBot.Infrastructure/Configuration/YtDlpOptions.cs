@@ -14,6 +14,14 @@ public sealed class YtDlpOptions
     public string? FfmpegPath { get; init; }
 
     /// <summary>
+    /// Path to the deno binary yt-dlp solves YouTube's player JS challenge with. Without a JS
+    /// runtime YouTube answers every media download with HTTP 403, so a Shorts link degrades to its
+    /// title. Fetched beside yt-dlp by <c>tools/fetch-tools.ps1</c>; when the file is absent yt-dlp
+    /// runs without one, as before.
+    /// </summary>
+    public string JsRuntimePath { get; init; } = "tools/yt-dlp/deno.exe";
+
+    /// <summary>
     /// Browser name (firefox / chrome / edge / brave / ...) whose session cookies yt-dlp should
     /// borrow. Lets the bot see content gated behind login on platforms like Instagram (image
     /// posts) and X. Leave null for anonymous extraction. Set via user-secrets or env:

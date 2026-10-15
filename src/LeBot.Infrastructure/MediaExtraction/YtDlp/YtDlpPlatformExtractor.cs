@@ -255,7 +255,19 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
         // look for a sanitised name that doesn't exist. --restrict-filenames keeps both
         // sides in lockstep with ASCII-only names.
         opts.AddCustomOption("--restrict-filenames", true);
+        // YouTube gates its stream URLs behind a JS challenge in the player; unsolved, the
+        // metadata still lists every format but each download comes back 403 Forbidden.
+        if (ResolveJsRuntime() is { } deno)
+        {
+            opts.AddCustomOption("--js-runtimes", $"deno:{deno}");
+        }
         return opts;
+    }
+
+    private string? ResolveJsRuntime()
+    {
+        var path = ExecutablePathResolver.Resolve(_options.JsRuntimePath);
+        return File.Exists(path) ? path : null;
     }
 
     private async Task<RunResult<T>> WithTransientRetryAsync<T>(
