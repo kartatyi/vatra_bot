@@ -24,6 +24,10 @@ An answer waits up to 8 seconds for the preparation. If it isn't done, the user 
 
 "Not ready" and "failed" answers both send the bare link, so choosing them never posts something odd — and in a chat where the bot lives, the link still gets reposted. Those answers are uncached by Telegram; ready answers may be cached for five minutes.
 
+### A placeholder that becomes the post (added 2026-10-15)
+
+"Not ready yet — send the link" made the user retype to get the video. Instead, a slow first answer now offers two placeholders — "⏳ Media" and "⏳ Media + text" — that send a "⏳ Loading the media…" message carrying a "🔗 Original" link button. When one is chosen, Telegram reports it (`chosen_inline_result`, which needs BotFather `/setinlinefeedback`) with the sent message's inline id, and the bot joins the running preparation and then edits that message in place: into the media via its file id, into the text for a text-only post, or into "🤷 Couldn't get media from this link" with the button kept. The button is required, not decoration — Telegram only reports an inline message id when the message carries a keyboard.
+
 ### Off the poll loop
 
 The dispatcher handles updates one at a time. An inline answer that may wait 8 seconds runs detached, as its own error boundary, so it never stalls a group's reposts.
@@ -36,5 +40,5 @@ Anyone who knows the bot's name can use inline mode. That is the owner's call: t
 
 - Inline mode needs two things outside the code: BotFather `/setinline`, and the storage channel with the bot as an admin. Without the channel id, only text posts can be answered.
 - Nothing inline is journalled — there's no chat to attribute it to, and per-keystroke queries would drown the dashboard.
-- A first-time long video usually answers "not ready" once. That's the price of Telegram's answer deadline.
+- A first-time long video answers with a placeholder that fills itself in seconds later; without `/setinlinefeedback` the placeholder would stay a placeholder.
 - The storage channel grows by one message per prepared link. The bot never deletes them: a Telegram file id is only guaranteed while its message exists.

@@ -66,6 +66,7 @@ public static class DependencyInjection
         services.AddSingleton<IPreparedPostStore, SqlitePreparedPostStore>();
         services.AddSingleton<IInlineMediaUploader, TelegramInlineMediaUploader>();
         services.AddSingleton<IInlineAnswerer, TelegramInlineAnswerer>();
+        services.AddSingleton<IInlineMessageEditor, TelegramInlineMessageEditor>();
         services.AddSingleton<ISeenLinkStore, SqliteSeenLinkStore>();
         services.AddSingleton<IPersonStatsStore, SqlitePersonStatsStore>();
         services.AddSingleton(sp => StatsTimeZoneResolver.Resolve(
