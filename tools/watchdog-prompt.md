@@ -134,13 +134,21 @@ report, and let a human look. A bad diagnosis must never turn into a restart loo
    <DeployRoot>`; publish wipes its output directory and would take the token, journal and
    logs with it.
 2. Copy the current `<DeployRoot>\LeBot.Host.exe` to `<BackupDir>\LeBot.Host.<runId>.exe`.
-3. `Get-Process -Name LeBot.Host | Stop-Process -Force` — name-exact, so the dashboard
-   keeps running. Wait for the file handle to release.
-4. Copy the new exe in, then
-   `Start-Process <DeployRoot>\LeBot.Host.exe -WorkingDirectory <DeployRoot>`.
+3. The bot is owned by the scheduled task `LeBot`, which restarts it within a minute of it
+   dying. Take that ownership away for the length of the swap, or the task will bring the
+   **old** exe back on top of your copy:
+   `Disable-ScheduledTask -TaskName 'LeBot'`, then `Stop-ScheduledTask -TaskName 'LeBot'`.
+   Confirm no `LeBot.Host` process is left and wait for the file handle to release.
+4. Copy the new exe in, then hand ownership back:
+   `Enable-ScheduledTask -TaskName 'LeBot'`, then `Start-ScheduledTask -TaskName 'LeBot'`.
+   Never `Start-Process` the exe yourself — a hand-started copy is invisible to the task,
+   which then starts a second one on its next tick, and two pollers is a 409.
 5. **Prove it came up:** within 60 seconds today's log must show `is online` and must not
-   show a Telegram `409 Conflict`. If it does not, **roll back**: restore the backup exe,
-   start it, confirm it is online, and report the rollback as the headline of your report.
+   show a Telegram `409 Conflict`. If it does not, **roll back**: restore the backup exe
+   the same disable → swap → enable way, confirm it is online, and report the rollback as
+   the headline of your report.
+   **Whatever happens, the task must end up enabled.** A deploy that leaves it disabled
+   leaves the bot unsupervised, which is worse than the bug you were fixing.
 6. Append the deploy (or the rollback) to `autopilot.json` with the run id and commit sha.
 
 ## Step 4 — report
@@ -195,7 +203,9 @@ Breaking one of these is worse than leaving the bug unfixed.
 - Never delete or edit `<DeployRoot>\appsettings.Local.json`, `data\`, `logs\`, `cache\`
   or `downloads\`.
 - Never stop `LeBot.Dashboard`. Never start a second `LeBot.Host` — two pollers means a
-  Telegram 409 and a dead bot.
+  Telegram 409 and a dead bot. Starting it is the scheduled task's job, never yours.
+- Never leave a scheduled task disabled, and never touch the `LeBot Dashboard`,
+  `LeBot Watchdog` or `LeBot Relay` tasks at all.
 - Never modify `tools/watchdog.ps1` or this prompt. If the watchdog itself is wrong, say
   so in the report and let a human change it.
 - Never deploy on red tests. Never deploy without a backup you have verified exists.

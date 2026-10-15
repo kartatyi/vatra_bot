@@ -170,6 +170,67 @@ Get-ScheduledTask -TaskName "LeBot" | Get-ScheduledTaskInfo
 
 The task restarts the bot once per minute for up to 999 attempts after any crash, and survives reboots because the trigger is `AtStartup` and `S4U` logon doesn't require an interactive session.
 
+### More than one process, or cookies that need a real user
+
+`--install` covers the server case: the bot alone, as `LocalSystem`, before anyone logs in. A workstation deployment is a different shape — the dashboard, the watchdog and any other helper run beside the bot, and `LocalSystem` cannot read the logged-in Firefox profile the cookie-gated extractors depend on. `tools/install-autostart.ps1` registers one task per process, as **you**, from a list the deployment owns:
+
+```powershell
+pwsh tools/install-autostart.ps1 -DeployRoot D:\lebot -CheckMinutes 1
+```
+
+```text
+LeBot.Host.exe started from a terminal  → dies silently when that terminal closes; job objects take the whole tree
+Startup-folder shortcut                 → survives that, but only reappears at the *next* logon, and can start a second copy
+one scheduled task per process          → back within a minute after a kill, a crash, or a reboot
+```
+
+Each task gets two triggers: at logon (so a reboot brings everything back) and a repeat every `-CheckMinutes` with `MultipleInstances=IgnoreNew`. While the process lives its task counts as running and the tick does nothing; the moment it dies the task ends and the next tick starts it. No service, no wrapper loop.
+
+The process list lives in `<DeployRoot>\autostart.json`, never in this repo — which processes a box runs is deployment identity. Without the file only the bot is registered.
+
+```jsonc
+[
+  {
+    "Name": "LeBot",                      // scheduled task name
+    "Execute": "LeBot.Host.exe",          // absolute, or relative to DeployRoot
+    "Arguments": "",                      // optional
+    "Match": "LeBot.Host.exe",            // optional: command line of an already-running
+                                          // copy, stopped so the task can own it instead
+    "StartupShortcut": "LeBot foo.lnk"    // optional: Startup shortcut this task replaces,
+                                          // disabled so it can't start a second copy
+  }
+]
+```
+
+`Match` matters more than it looks: a copy you started by hand is invisible to the task, so the next tick starts a **second** one — and two long-pollers on one token is a Telegram `409`. The script stops the running copy first, then hands ownership to the task.
+
+Remove it all with `-Uninstall`; the tasks go, the running processes don't.
+
+**Swapping a binary under a live task** needs the ownership handed back and forth, or the task restores the old exe on top of your copy mid-swap:
+
+```powershell
+Disable-ScheduledTask -TaskName 'LeBot'; Stop-ScheduledTask -TaskName 'LeBot'
+Copy-Item <new>\LeBot.Host.exe D:\lebot\LeBot.Host.exe -Force   # after the handle releases
+Enable-ScheduledTask -TaskName 'LeBot'; Start-ScheduledTask -TaskName 'LeBot'
+```
+
+```text
+Stop-Process, copy, Start-Process  → the task starts its own copy within the minute → two pollers → 409
+disable, stop, copy, enable, start → one process, and it is the new binary
+```
+
+The watchdog runs the deployment's own copy of `watchdog.ps1`, not the repo's, so that checking out a branch here cannot change what is executing. Re-copy it into `<DeployRoot>\watchdog\` (with `watchdog-prompt.md`) after changing either.
+
+The watchdog's own liveness check reports what the tasks quietly fix — see `tools/watchdog.ps1`. It alerts on Telegram when the bot has been missing for `-LivenessGraceMinutes`, and never restarts it: one supervisor, or you get the 409 above.
+
+The dashboard is the exception, because its failure is one the task cannot see: a reader up for days has wedged with the process still alive, serving its page while every `/api/*` call returns 500. The watchdog probes `-DashboardProbeUrl` every `-DashboardProbeMinutes`, and after `-DashboardFailuresBeforeRestart` failures in a row (5xx or no answer) restarts it through its task. It holds no token, so there is no 409 to race. If it wedges again within `-DashboardRestartCooldownMinutes` it alerts instead of looping, since a restart is evidently not the cure.
+
+```text
+dashboard process gone            → the task's next tick, the watchdog stays out of it
+process alive, /api/* 500 twice   → watchdog: Stop-ScheduledTask, Start-ScheduledTask
+wedged again inside the cooldown  → one Telegram alert, no restart loop
+```
+
 ### Watch the logs
 
 ```powershell
