@@ -36,7 +36,7 @@ public sealed class AnswerInlineQueryHandler(
         InlineAnswer answer = await Task.WhenAny(preparing, budget) != preparing
             ? new InlineAnswer.NotReady(url)
             : await preparing is { } post
-                ? new InlineAnswer.Ready(post)
+                ? new InlineAnswer.Ready(post, url)
                 : new InlineAnswer.Failed(url);
 
         logger.LogDebug("Answering inline query for {Url} with {Answer}", url, answer.GetType().Name);

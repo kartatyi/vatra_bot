@@ -11,7 +11,7 @@ public abstract record InlineAnswer
     public sealed record NoLink : InlineAnswer;
 
     /// <summary>The post is ready to send.</summary>
-    public sealed record Ready(PreparedPost Post) : InlineAnswer;
+    public sealed record Ready(PreparedPost Post, Uri Url) : InlineAnswer;
 
     /// <summary>The post is still being fetched; the user can send the bare link meanwhile.</summary>
     public sealed record NotReady(Uri Url) : InlineAnswer;

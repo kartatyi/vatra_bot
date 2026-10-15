@@ -46,7 +46,7 @@ public class InlineTests
 
         await CreateHandler().HandleAsync(new InlineQuery("q", Url.AbsoluteUri), CancellationToken.None);
 
-        await _answerer.Received(1).AnswerAsync("q", new InlineAnswer.Ready(post), Arg.Any<CancellationToken>());
+        await _answerer.Received(1).AnswerAsync("q", new InlineAnswer.Ready(post, Url), Arg.Any<CancellationToken>());
         await _extractor.DidNotReceiveWithAnyArgs().ExtractAsync(default!, default);
     }
 
