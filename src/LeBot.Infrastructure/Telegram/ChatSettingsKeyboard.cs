@@ -5,8 +5,9 @@ namespace LeBot.Infrastructure.Telegram;
 
 /// <summary>
 /// The <c>/settings</c> message: its text, its inline keyboard, and the callback data the keyboard sends
-/// back. One row per setting, one button per choice, the current choice ticked. Pure, so the round trip
-/// from button to <see cref="ChatSettings"/> is testable without Telegram.
+/// back. One row per setting, one button per choice, the current choice ticked. Labels follow the language
+/// of whoever opened or pressed it; the callback data never changes with the language. Pure, so the round
+/// trip from button to <see cref="ChatSettings"/> is testable without Telegram.
 /// </summary>
 internal static class ChatSettingsKeyboard
 {
@@ -20,7 +21,16 @@ internal static class ChatSettingsKeyboard
     private const string Off = "Off";
     private const string Tick = "✅ ";
 
-    public const string Text =
+    /// <summary>The message above the keyboard.</summary>
+    public static string Text(BotLanguage lang) => lang.Pick(
+        "⚙️ Налаштування цього чату\n\n" +
+        "🎬 Відео — текст під TikTok, Reels, Shorts\n" +
+        "📝 Пости — текст постів Threads, X, Reddit і фото\n" +
+        "🔘 Кнопка — «" + RevealButton.Label + "» під репостом, якщо текст сховано чи скорочено\n" +
+        "🤷 Знизування — 🤷 на лінк, який не вдалося завантажити\n" +
+        "📬 Підсумок — щопонеділка вранці підсумок лінків за тиждень\n\n" +
+        "Без тексту: лише медіа · Коротко: без хештегів, кілька рядків · Повністю: як у пості\n" +
+        "Змінювати можуть лише адміни групи.",
         "⚙️ Settings for this chat\n\n" +
         "🎬 Video — the text under TikToks, Reels, Shorts\n" +
         "📝 Post — the text of Threads, X, Reddit and photo posts\n" +
@@ -28,35 +38,37 @@ internal static class ChatSettingsKeyboard
         "🤷 Shrug — a 🤷 on a link the bot couldn't fetch\n" +
         "📬 Digest — a Monday-morning summary of last week's links\n\n" +
         "Off: media only · Brief: no hashtags, a few lines · Full: as posted\n" +
-        "Only group admins can change these.";
+        "Only group admins can change these.");
 
-    public const string AdminsOnly = "Only group admins can change these settings.";
+    public static string AdminsOnly(BotLanguage lang) => lang.Pick(
+        "Змінювати ці налаштування можуть лише адміни групи.",
+        "Only group admins can change these settings.");
 
-    public const string Saved = "Saved ✓";
+    public static string Saved(BotLanguage lang) => lang.Pick("Збережено ✓", "Saved ✓");
 
     /// <summary>The keyboard for <paramref name="settings"/>, with the active choice of each row ticked.</summary>
-    public static InlineKeyboardMarkup Markup(ChatSettings settings) => new(
+    public static InlineKeyboardMarkup Markup(ChatSettings settings, BotLanguage lang) => new(
     [
         [
-            ModeButton("🎬 Off", VideoKey, CaptionMode.Off, settings.VideoCaption),
-            ModeButton("🎬 Brief", VideoKey, CaptionMode.Brief, settings.VideoCaption),
-            ModeButton("🎬 Full", VideoKey, CaptionMode.Full, settings.VideoCaption),
+            ModeButton(lang.Pick("🎬 Без тексту", "🎬 Off"), VideoKey, CaptionMode.Off, settings.VideoCaption),
+            ModeButton(lang.Pick("🎬 Коротко", "🎬 Brief"), VideoKey, CaptionMode.Brief, settings.VideoCaption),
+            ModeButton(lang.Pick("🎬 Повністю", "🎬 Full"), VideoKey, CaptionMode.Full, settings.VideoCaption),
         ],
         [
-            ModeButton("📝 Brief", PostKey, CaptionMode.Brief, settings.PostCaption),
-            ModeButton("📝 Full", PostKey, CaptionMode.Full, settings.PostCaption),
+            ModeButton(lang.Pick("📝 Коротко", "📝 Brief"), PostKey, CaptionMode.Brief, settings.PostCaption),
+            ModeButton(lang.Pick("📝 Повністю", "📝 Full"), PostKey, CaptionMode.Full, settings.PostCaption),
         ],
         [
-            Button("🔘 Button on", ButtonKey, On, settings.OfferFullText),
-            Button("🔘 Button off", ButtonKey, Off, !settings.OfferFullText),
+            Button(lang.Pick("🔘 Кнопка: так", "🔘 Button on"), ButtonKey, On, settings.OfferFullText),
+            Button(lang.Pick("🔘 Кнопка: ні", "🔘 Button off"), ButtonKey, Off, !settings.OfferFullText),
         ],
         [
-            Button("🤷 Shrug on", ShrugKey, On, settings.ShrugOnFailure),
-            Button("🤷 Shrug off", ShrugKey, Off, !settings.ShrugOnFailure),
+            Button(lang.Pick("🤷 Знизування: так", "🤷 Shrug on"), ShrugKey, On, settings.ShrugOnFailure),
+            Button(lang.Pick("🤷 Знизування: ні", "🤷 Shrug off"), ShrugKey, Off, !settings.ShrugOnFailure),
         ],
         [
-            Button("📬 Digest on", DigestKey, On, settings.WeeklyDigest),
-            Button("📬 Digest off", DigestKey, Off, !settings.WeeklyDigest),
+            Button(lang.Pick("📬 Підсумок: так", "📬 Digest on"), DigestKey, On, settings.WeeklyDigest),
+            Button(lang.Pick("📬 Підсумок: ні", "📬 Digest off"), DigestKey, Off, !settings.WeeklyDigest),
         ],
     ]);
 

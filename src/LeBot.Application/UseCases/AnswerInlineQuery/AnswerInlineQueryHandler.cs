@@ -27,7 +27,7 @@ public sealed class AnswerInlineQueryHandler(
     {
         if (urlExtractor.Extract(query.Text) is not [var url, ..])
         {
-            await answerer.AnswerAsync(query.Id, new InlineAnswer.NoLink(), cancellationToken);
+            await answerer.AnswerAsync(query.Id, new InlineAnswer.NoLink(), query.LanguageCode, cancellationToken);
             return;
         }
 
@@ -40,6 +40,6 @@ public sealed class AnswerInlineQueryHandler(
                 : new InlineAnswer.Failed(url);
 
         logger.LogDebug("Answering inline query for {Url} with {Answer}", url, answer.GetType().Name);
-        await answerer.AnswerAsync(query.Id, answer, cancellationToken);
+        await answerer.AnswerAsync(query.Id, answer, query.LanguageCode, cancellationToken);
     }
 }

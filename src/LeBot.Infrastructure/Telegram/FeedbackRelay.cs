@@ -20,27 +20,43 @@ public sealed class FeedbackRelay(
     TimeProvider timeProvider,
     ILogger<FeedbackRelay> logger)
 {
-    public const string Usage = "Tell me what's broken or what you'd like to see: /feedback <your message>";
-    public const string Thanks = "Thanks — sent to the maintainer 🙏";
-    public const string NotSetUp = "Feedback isn't set up on this bot yet.";
-    public const string TooSoon = "Got your last one — give it a minute before the next.";
-    public const string Failed = "Couldn't deliver that just now — please try again later.";
+    internal static string Usage(BotLanguage lang) => lang.Pick(
+        "Напиши, що зламалося або що хотілося б мати: /feedback <твоє повідомлення>",
+        "Tell me what's broken or what you'd like to see: /feedback <your message>");
+
+    internal static string Thanks(BotLanguage lang) => lang.Pick("Дякую — передав розробнику 🙏", "Thanks — sent to the maintainer 🙏");
+
+    internal static string NotSetUp(BotLanguage lang) => lang.Pick(
+        "Відгуки для цього бота ще не налаштовані.",
+        "Feedback isn't set up on this bot yet.");
+
+    internal static string TooSoon(BotLanguage lang) => lang.Pick(
+        "Попереднє отримав — зачекай хвилинку перед наступним.",
+        "Got your last one — give it a minute before the next.");
+
+    internal static string Failed(BotLanguage lang) => lang.Pick(
+        "Зараз не вдалося передати — спробуй трохи згодом.",
+        "Couldn't deliver that just now — please try again later.");
 
     private const int MaxLength = 3500; // leaves room for the header inside Telegram's 4096
 
     private readonly ConcurrentDictionary<long, DateTimeOffset> _lastSent = new();
 
-    /// <summary>Relays <paramref name="text"/> from <paramref name="message"/>'s sender and returns the reply for them.</summary>
+    /// <summary>
+    /// Relays <paramref name="text"/> from <paramref name="message"/>'s sender and returns the reply for them,
+    /// in their language. The maintainer's copy is always English.
+    /// </summary>
     public async Task<string> RelayAsync(Message message, string? text, CancellationToken cancellationToken)
     {
+        var lang = BotLanguages.From(message.From?.LanguageCode);
         if (string.IsNullOrWhiteSpace(text))
         {
-            return Usage;
+            return Usage(lang);
         }
 
         if ((feedback.Value.ChatId ?? update.Value.NotifyChatId) is not { } maintainer)
         {
-            return NotSetUp;
+            return NotSetUp(lang);
         }
 
         var senderId = message.From?.Id ?? message.Chat.Id;
@@ -48,7 +64,7 @@ public sealed class FeedbackRelay(
         var cooldown = TimeSpan.FromSeconds(feedback.Value.CooldownSeconds);
         if (_lastSent.TryGetValue(senderId, out var last) && now - last < cooldown)
         {
-            return TooSoon;
+            return TooSoon(lang);
         }
 
         try
@@ -56,12 +72,12 @@ public sealed class FeedbackRelay(
             await bot.SendMessage(maintainer, Format(message, text.Trim()), cancellationToken: cancellationToken);
             _lastSent[senderId] = now;
             logger.LogInformation("Relayed feedback from chat {ChatId}", message.Chat.Id);
-            return Thanks;
+            return Thanks(lang);
         }
         catch (RequestException ex)
         {
             logger.LogWarning(ex, "Could not relay feedback from chat {ChatId}", message.Chat.Id);
-            return Failed;
+            return Failed(lang);
         }
     }
 

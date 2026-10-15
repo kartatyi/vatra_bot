@@ -11,9 +11,9 @@ internal sealed class TelegramInlineAnswerer(
     ITelegramBotClient bot,
     ILogger<TelegramInlineAnswerer> logger) : IInlineAnswerer
 {
-    public async Task AnswerAsync(string queryId, InlineAnswer answer, CancellationToken cancellationToken)
+    public async Task AnswerAsync(string queryId, InlineAnswer answer, string? languageCode, CancellationToken cancellationToken)
     {
-        var (results, cacheSeconds) = InlineResults.For(answer);
+        var (results, cacheSeconds) = InlineResults.For(answer, BotLanguages.From(languageCode));
         try
         {
             await bot.AnswerInlineQuery(queryId, results, cacheTime: cacheSeconds, cancellationToken: cancellationToken);

@@ -41,10 +41,10 @@ public class TelegramInlineMessageEditorTests
     [Fact]
     public async Task ShowFailure_SaysSoAndKeepsTheLink()
     {
-        await Sut().ShowFailureAsync("im-1", Url, CancellationToken.None);
+        await Sut().ShowFailureAsync("im-1", Url, null, CancellationToken.None);
 
         await _bot.Received(1).SendRequest(
-            Arg.Is<EditInlineMessageTextRequest>(r => r.Text == $"{InlineResults.FailedTitle}\n{Url.AbsoluteUri}" && r.ReplyMarkup != null),
+            Arg.Is<EditInlineMessageTextRequest>(r => r.Text == $"{InlineResults.FailedTitle(BotLanguage.En)}\n{Url.AbsoluteUri}" && r.ReplyMarkup != null),
             Arg.Any<CancellationToken>());
     }
 

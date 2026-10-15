@@ -29,7 +29,7 @@ public sealed class CompleteInlinePlaceholderHandler(
         }
         else
         {
-            await editor.ShowFailureAsync(chosen.InlineMessageId, url, cancellationToken);
+            await editor.ShowFailureAsync(chosen.InlineMessageId, url, chosen.LanguageCode, cancellationToken);
         }
     }
 }

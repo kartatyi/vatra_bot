@@ -15,6 +15,9 @@ public interface IInlineMessageEditor
     /// </summary>
     Task ShowPostAsync(string inlineMessageId, PreparedPost post, bool withText, CancellationToken cancellationToken);
 
-    /// <summary>Turns the placeholder into "couldn't get media", keeping the link so it still leads somewhere.</summary>
-    Task ShowFailureAsync(string inlineMessageId, Uri url, CancellationToken cancellationToken);
+    /// <summary>
+    /// Turns the placeholder into "couldn't get media", in the sender's <paramref name="languageCode"/>,
+    /// keeping the link so it still leads somewhere.
+    /// </summary>
+    Task ShowFailureAsync(string inlineMessageId, Uri url, string? languageCode, CancellationToken cancellationToken);
 }

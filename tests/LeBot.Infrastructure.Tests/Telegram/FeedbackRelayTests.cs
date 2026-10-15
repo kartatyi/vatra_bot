@@ -26,7 +26,7 @@ public class FeedbackRelayTests
     {
         var reply = await Sut().RelayAsync(GroupMessage(), "  the bot missed a reel  ", CancellationToken.None);
 
-        reply.Should().Be(FeedbackRelay.Thanks);
+        reply.Should().Be(FeedbackRelay.Thanks(BotLanguage.En));
         await _bot.Received(1).SendRequest(
             Arg.Is<SendMessageRequest>(r => r.ChatId == Maintainer && r.Text == "💬 Feedback from Petro K (@petro) in «Vatra»:\n\nthe bot missed a reel"),
             Arg.Any<CancellationToken>());
@@ -37,7 +37,7 @@ public class FeedbackRelayTests
     [InlineData("   ")]
     public async Task Relay_NoText_ExplainsUsageAndSendsNothing(string? text)
     {
-        (await Sut().RelayAsync(GroupMessage(), text, CancellationToken.None)).Should().Be(FeedbackRelay.Usage);
+        (await Sut().RelayAsync(GroupMessage(), text, CancellationToken.None)).Should().Be(FeedbackRelay.Usage(BotLanguage.En));
 
         await _bot.DidNotReceiveWithAnyArgs().SendRequest(Arg.Any<IRequest<Message>>(), default);
     }
@@ -46,7 +46,7 @@ public class FeedbackRelayTests
     public async Task Relay_NoMaintainerChat_SaysItIsNotSetUp()
     {
         (await Sut(feedbackChat: null, notifyChat: null).RelayAsync(GroupMessage(), "hi", CancellationToken.None))
-            .Should().Be(FeedbackRelay.NotSetUp);
+            .Should().Be(FeedbackRelay.NotSetUp(BotLanguage.En));
     }
 
     [Fact]
@@ -67,8 +67,8 @@ public class FeedbackRelayTests
         _time.Advance(TimeSpan.FromSeconds(61));
         var later = await sut.RelayAsync(GroupMessage(), "three", CancellationToken.None);
 
-        tooSoon.Should().Be(FeedbackRelay.TooSoon);
-        later.Should().Be(FeedbackRelay.Thanks);
+        tooSoon.Should().Be(FeedbackRelay.TooSoon(BotLanguage.En));
+        later.Should().Be(FeedbackRelay.Thanks(BotLanguage.En));
     }
 
     [Fact]
@@ -77,7 +77,7 @@ public class FeedbackRelayTests
         _bot.SendRequest(Arg.Any<IRequest<Message>>(), Arg.Any<CancellationToken>())
             .Returns<Message>(_ => throw new ApiRequestException("Forbidden: bot was blocked by the user", 403));
 
-        (await Sut().RelayAsync(GroupMessage(), "hi", CancellationToken.None)).Should().Be(FeedbackRelay.Failed);
+        (await Sut().RelayAsync(GroupMessage(), "hi", CancellationToken.None)).Should().Be(FeedbackRelay.Failed(BotLanguage.En));
     }
 
     [Fact]

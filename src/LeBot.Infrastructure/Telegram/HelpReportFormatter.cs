@@ -16,6 +16,10 @@ internal static class HelpReportFormatter
         "I repost the video or photo behind any link posted in this chat — TikTok, Instagram, " +
         "YouTube Shorts, Threads, X, Reddit and ~1800 more sites. Just drop a link.";
 
+    internal const string FallbackDescriptionUk =
+        "Я пересилаю відео чи фото з будь-якого лінка в цьому чаті — TikTok, Instagram, " +
+        "YouTube Shorts, Threads, X, Reddit і ще ~1800 сайтів. Просто кинь лінк.";
+
     private static readonly ReleaseVersion DevVersion = new(0, 0, 0);
 
     /// <summary>
@@ -23,9 +27,10 @@ internal static class HelpReportFormatter
     /// one line per menu command, then the running version — left off for an unstamped dev build, whose
     /// <c>0.0.0</c> would only mislead.
     /// </summary>
-    public static string Help(string? description, IReadOnlyList<BotCommand> commands, ReleaseVersion version)
+    public static string Help(string? description, IReadOnlyList<BotCommand> commands, ReleaseVersion version, BotLanguage lang = BotLanguage.En)
     {
-        var sb = new StringBuilder(string.IsNullOrWhiteSpace(description) ? FallbackDescription : description.Trim());
+        var fallback = lang.Pick(FallbackDescriptionUk, FallbackDescription);
+        var sb = new StringBuilder(string.IsNullOrWhiteSpace(description) ? fallback : description.Trim());
 
         if (commands.Count > 0)
         {

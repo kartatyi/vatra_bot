@@ -20,6 +20,7 @@ Quality bar: **code you'd put on a CV.** Every rule below earns its place by kee
 - Never `--no-verify`, never `--force`, never `--amend` a pushed commit — unless asked in this same turn.
 - **No AI attribution, ever** — no `Co-Authored-By: Claude`, no `Generated with…`. The committer is the human. (Stated once; here is canonical.)
 - **Everything published is in English** — commit message, PR *title and body*, code, comments, docs, ADRs, log templates, issue replies. The chat is a separate channel: whatever language it runs in, that language stops at the repo boundary. (Stated once; here is canonical.)
+  The one exception is the bot's own user-facing copy, which ships in English *and* Ukrainian ([`BotLanguage`](src/LeBot.Infrastructure/Telegram/BotLanguage.cs)): English by default, Ukrainian for a person whose Telegram is set to Ukrainian. Both strings sit side by side in the formatter — `lang.Pick(uk, en)` — never in a separate resource file.
 
 ```
 ## What / Adds the read side to the durable repost journal.   good — the chat was Ukrainian; the PR is not
