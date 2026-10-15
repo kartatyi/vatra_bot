@@ -166,7 +166,7 @@ public class InlineTests
 
         await CreatePlaceholderHandler().HandleAsync(new ChosenPlaceholder("im-1", Url.AbsoluteUri, withText), CancellationToken.None);
 
-        await _editor.Received(1).ShowPostAsync("im-1", post, withText, Arg.Any<CancellationToken>());
+        await _editor.Received(1).ShowPostAsync("im-1", post, withText, Url, Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

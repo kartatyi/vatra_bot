@@ -16,20 +16,22 @@ internal sealed class TelegramInlineMessageEditor(
     ITelegramBotClient bot,
     ILogger<TelegramInlineMessageEditor> logger) : IInlineMessageEditor
 {
-    public async Task ShowPostAsync(string inlineMessageId, PreparedPost post, bool withText, CancellationToken cancellationToken)
+    public async Task ShowPostAsync(string inlineMessageId, PreparedPost post, bool withText, Uri url, string? languageCode, CancellationToken cancellationToken)
     {
+        // The "Original" button stays: an inline message lands in someone else's chat, where the link to the
+        // source — a listing, a thread — is often the point.
+        var original = InlineResults.OriginalLink(url, BotLanguages.From(languageCode));
         try
         {
             if (post is { Kind: { } kind, FileId: { } fileId })
             {
-                // Editing without a keyboard drops the placeholder's "Original" button: the post is here now.
                 var caption = withText && post.Body is { } body ? InlineResults.Fit(body, InlineResults.CaptionLimit) : null;
-                await bot.EditMessageMedia(inlineMessageId, Media(kind, fileId, caption), cancellationToken: cancellationToken);
+                await bot.EditMessageMedia(inlineMessageId, Media(kind, fileId, caption), replyMarkup: original, cancellationToken: cancellationToken);
             }
             else if (post.Body is { } text)
             {
                 // A text-only post is its text, whichever variant was picked.
-                await bot.EditMessageText(inlineMessageId, InlineResults.Fit(text, InlineResults.TextLimit), cancellationToken: cancellationToken);
+                await bot.EditMessageText(inlineMessageId, InlineResults.Fit(text, InlineResults.TextLimit), replyMarkup: original, cancellationToken: cancellationToken);
             }
         }
         catch (RequestException ex)

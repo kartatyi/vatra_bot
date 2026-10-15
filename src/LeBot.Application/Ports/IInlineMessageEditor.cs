@@ -10,10 +10,11 @@ public interface IInlineMessageEditor
 {
     /// <summary>
     /// Turns the placeholder into <paramref name="post"/>: its media, captioned with the post's text when
-    /// <paramref name="withText"/>, or the text alone for a post with no media. Best-effort: a placeholder
-    /// the sender already deleted is simply gone.
+    /// <paramref name="withText"/>, or the text alone for a post with no media — keeping a link to
+    /// <paramref name="url"/>, since whoever receives it may want the original. Best-effort: a placeholder the
+    /// sender already deleted is simply gone.
     /// </summary>
-    Task ShowPostAsync(string inlineMessageId, PreparedPost post, bool withText, CancellationToken cancellationToken);
+    Task ShowPostAsync(string inlineMessageId, PreparedPost post, bool withText, Uri url, string? languageCode, CancellationToken cancellationToken);
 
     /// <summary>
     /// Turns the placeholder into "couldn't get media", in the sender's <paramref name="languageCode"/>,

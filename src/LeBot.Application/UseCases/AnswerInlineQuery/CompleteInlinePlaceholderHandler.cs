@@ -25,7 +25,7 @@ public sealed class CompleteInlinePlaceholderHandler(
 
         if (await preparer.PrepareAsync(url) is { } post)
         {
-            await editor.ShowPostAsync(chosen.InlineMessageId, post, chosen.WithText, cancellationToken);
+            await editor.ShowPostAsync(chosen.InlineMessageId, post, chosen.WithText, url, chosen.LanguageCode, cancellationToken);
         }
         else
         {
