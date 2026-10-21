@@ -12,15 +12,15 @@ namespace LeBot.Infrastructure.MediaCache;
 internal sealed record MediaCacheKey(string NormalizedUrl, string DirectoryName)
 {
     // Query params that identify the *sharer*, not the content: TikTok's share sheet appends
-    // ?_r/?_t/?is_from_webapp, X appends ?s=&t=, Instagram ?igshid=. Two people posting the same clip
-    // produce different URLs that differ only here — dropping them is what makes the cache hit at all
-    // in a group chat. Anything not on this list is kept, because it might select the content
-    // (?v= on YouTube being the obvious one).
+    // ?_r/?_t/?is_from_webapp, X appends ?s=&t=, Instagram ?igshid=, OLX ?search_reason=. Two people
+    // posting the same clip produce different URLs that differ only here — dropping them is what makes
+    // the cache hit at all in a group chat. Anything not on this list is kept, because it might select
+    // the content (?v= on YouTube being the obvious one).
     private static readonly HashSet<string> TrackingParams = new(StringComparer.OrdinalIgnoreCase)
     {
         "igshid", "igsh", "fbclid", "gclid", "si", "s", "t", "_r", "_t", "is_from_webapp",
         "sender_device", "sender_web_id", "web_id", "share_app_id", "share_link_id", "share_item_id",
-        "tt_from", "ref_src", "ref_url", "feature",
+        "tt_from", "ref_src", "ref_url", "feature", "search_reason",
     };
 
     // 128 bits of SHA-256: collision-proof in practice for a cache that holds hundreds of entries,

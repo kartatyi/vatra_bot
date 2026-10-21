@@ -16,6 +16,8 @@ public class MediaCacheKeyTests
     [InlineData("https://instagram.com/p/abc/?igshid=XYZ", "https://instagram.com/p/abc/")]
     [InlineData("https://x.com/u/status/9?s=20&t=kk", "https://x.com/u/status/9")]
     [InlineData("https://youtube.com/watch?v=abc&utm_source=news", "https://youtube.com/watch?v=abc")]
+    // OLX tags a link copied off a search results page with how it was found.
+    [InlineData("https://www.olx.ua/d/uk/obyavlenie/x-ID11svhc.html?search_reason=search%7Corganic", "https://www.olx.ua/d/uk/obyavlenie/x-ID11svhc.html")]
     // Order of the surviving params must not matter.
     [InlineData("https://example.com/w?a=1&b=2", "https://example.com/w?b=2&a=1")]
     // Fragments are client-side only.
