@@ -17,6 +17,7 @@ public static class PlatformName
         ("Reddit", ["reddit.com", "redd.it"]),
         ("Facebook", ["facebook.com", "fb.watch"]),
         ("Steam", ["steampowered.com", "steamcommunity.com"]),
+        ("OLX", ["olx.ua"]),
     ];
 
     /// <summary>The platform name for <paramref name="host"/>.</summary>

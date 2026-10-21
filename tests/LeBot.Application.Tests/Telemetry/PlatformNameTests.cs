@@ -14,6 +14,7 @@ public class PlatformNameTests
     [InlineData("twitter.com", "X")]
     [InlineData("old.reddit.com", "Reddit")]
     [InlineData("store.steampowered.com", "Steam")]
+    [InlineData("m.olx.ua", "OLX")]
     public void Of_KnownHost_NamesThePlatform(string host, string expected)
     {
         PlatformName.Of(host).Should().Be(expected);
