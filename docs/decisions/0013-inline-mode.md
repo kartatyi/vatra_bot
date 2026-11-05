@@ -1,0 +1,44 @@
+# 0013. Inline Mode Through a Storage Channel
+
+Date: 2026-10-15
+Status: Proposed
+
+## Context
+
+The bot only helps where it is a member. To send a friend a TikTok in a private chat, you still paste a link and they still leave Telegram. Telegram's inline mode — typing `@bot <link>` in any chat — would bring the bot's repost anywhere, but it comes with two hard constraints:
+
+- **An inline result can only point at a file Telegram already holds** (a cached `file_id`), or at a public URL Telegram fetches itself. The bot downloads media to its own disk; nothing it has is public.
+- **An answer must come fast.** The user is typing; a query unanswered within seconds is dropped, and every keystroke sends a new one. A first-time extraction can take far longer than that.
+
+## Decision
+
+### Upload to a private storage channel, remember the file id
+
+A channel only the bot posts to, configured as `Storage:ChatId` (deployment identity — renamed from `Inline:StorageChatId` when the channel became the media store too, [ADR 0015](0015-telegram-media-store.md) — user-secrets, never committed). Preparing a link means: fetch it the way a group repost does (media cache, then the extractor chain), upload its first item to the channel, and store `(link key → kind, file_id, text)` in a `PreparedPosts` table keyed like the media cache. Every later query for that link — from anyone, in any chat — is answered from the table without touching the platform or re-uploading. Entries live 30 days, so an edited post isn't served stale for ever.
+
+Only the first item goes up: Telegram has no inline albums. A multi-photo post offers its first photo with the text.
+
+### Wait a little, then let the work finish in the background
+
+An answer waits about a second for the preparation — enough for a prepared or stored link to come back as the ready post. If it isn't done, the user is offered the placeholders below at once (this was first 8 seconds and a "send the link instead" notice; the placeholders made the wait pointless), and the preparation keeps running on its own clock (3-minute cap). Concurrent queries for one link share a single preparation.
+
+"Not ready" and "failed" answers both send the bare link, so choosing them never posts something odd — and in a chat where the bot lives, the link still gets reposted. Those answers are uncached by Telegram; ready answers may be cached for five minutes.
+
+### A placeholder that becomes the post (added 2026-10-15)
+
+"Not ready yet — send the link" made the user retype to get the video. Instead, a slow first answer now offers two placeholders — "⏳ Media" and "⏳ Media + text" — that send a "⏳ Loading the media…" message carrying a "🔗 Original" link button. When one is chosen, Telegram reports it (`chosen_inline_result`, which needs BotFather `/setinlinefeedback`) with the sent message's inline id, and the bot joins the running preparation and then edits that message in place: into the media via its file id, into the text for a text-only post, or into "🤷 Couldn't get media from this link" with the button kept. The button is required, not decoration — Telegram only reports an inline message id when the message carries a keyboard.
+
+### Off the poll loop
+
+The dispatcher handles updates one at a time. An inline answer that waits on a preparation runs detached, as its own error boundary, so it never stalls a group's reposts.
+
+### Open to everyone
+
+Anyone who knows the bot's name can use inline mode. That is the owner's call: the cost is server bandwidth for strangers' links, and the storage table makes every repeat link free.
+
+## Consequences
+
+- Inline mode needs two things outside the code: BotFather `/setinline`, and the storage channel with the bot as an admin. Without the channel id, only text posts can be answered.
+- Nothing inline is journalled — there's no chat to attribute it to, and per-keystroke queries would drown the dashboard.
+- A first-time long video answers with a placeholder that fills itself in seconds later; without `/setinlinefeedback` the placeholder would stay a placeholder.
+- The storage channel grows by one message per prepared link. The bot never deletes them: a Telegram file id is only guaranteed while its message exists.

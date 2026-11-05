@@ -52,7 +52,7 @@ public class DashboardReportFormatterTests
     [Fact]
     public void Failures_Empty_ReturnsCheerfulNotice()
     {
-        DashboardReportFormatter.Failures([], Now).Should().Be("No failures recorded 🎉");
+        DashboardReportFormatter.Failures([], Now).Should().Be("No failures in this chat 🎉");
     }
 
     [Fact]
@@ -66,7 +66,7 @@ public class DashboardReportFormatterTests
 
         var report = DashboardReportFormatter.Failures(failures, Now);
 
-        report.Should().Contain("Last 2 failure(s)");
+        report.Should().Contain("Last 2 failure(s) in this chat");
         report.Should().Contain("30m ago · tiktok.com");
         report.Should().Contain("https://tiktok.com/@a/video/1");
         report.Should().Contain("ContentUnavailable: video is private");

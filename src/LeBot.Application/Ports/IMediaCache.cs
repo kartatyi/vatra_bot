@@ -18,11 +18,13 @@ public interface IMediaCache
     Task<CachedRepost?> TryGetAsync(Uri url, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Stores <paramref name="payload"/> under its source URL, taking its own copies of the files so
-    /// the caller stays free to delete the originals. Best-effort: failures are logged, never thrown.
+    /// Stores <paramref name="payload"/> under its source URL and returns the payload to send from here
+    /// on: the same post, its media referenced however the store keeps it — the caller's own files for a
+    /// store that copies them, or files Telegram already holds for one that uploads them. Best-effort:
+    /// failures are logged, never thrown, and answer with <paramref name="payload"/> unchanged.
     /// </summary>
     /// <param name="payload">A payload with media or replyable text; hollow ones aren't worth storing.</param>
     /// <param name="extractor">Type name of the extractor that produced it, replayed on every hit.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task SaveAsync(MediaPayload payload, string extractor, CancellationToken cancellationToken);
+    Task<MediaPayload> SaveAsync(MediaPayload payload, string extractor, CancellationToken cancellationToken);
 }

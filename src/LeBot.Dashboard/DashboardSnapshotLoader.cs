@@ -41,7 +41,7 @@ internal static class DashboardSnapshotLoader
             var byFailureRate = await store.GetTopHostsByFailureRateAsync(TopHostsLimit, FailureRateMinVolume, since, cancellationToken);
             var extractors = await store.GetExtractorStatsAsync(since, cancellationToken);
             var versions = await store.GetVersionStatsAsync(since, cancellationToken);
-            var failures = await store.GetRecentFailuresAsync(RecentFailuresLimit, cancellationToken);
+            var failures = await store.GetRecentFailuresAsync(RecentFailuresLimit, chatHash: null, cancellationToken);
 
             return new DashboardSnapshot(
                 now, windowDays, Notice: null,

@@ -17,6 +17,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Telegram.Bot;
 
@@ -34,9 +35,12 @@ public static class DependencyInjection
         services.Configure<TelegramOptions>(configuration.GetSection(TelegramOptions.SectionName));
         services.Configure<YtDlpOptions>(configuration.GetSection(YtDlpOptions.SectionName));
         services.Configure<UpdateOptions>(configuration.GetSection(UpdateOptions.SectionName));
+        services.Configure<FeedbackOptions>(configuration.GetSection(FeedbackOptions.SectionName));
         services.Configure<ThreadsOptions>(configuration.GetSection(ThreadsOptions.SectionName));
         services.Configure<MediaCacheOptions>(configuration.GetSection(MediaCacheOptions.SectionName));
         services.Configure<TelemetryOptions>(configuration.GetSection(TelemetryOptions.SectionName));
+        services.Configure<StorageOptions>(configuration.GetSection(StorageOptions.SectionName));
+        services.Configure<StatsOptions>(configuration.GetSection(StatsOptions.SectionName));
 
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IHostAccountInfo, HostAccountInfo>();
@@ -58,6 +62,18 @@ public static class DependencyInjection
             dbOptions.UseSqlite(connectionString);
         });
         services.AddSingleton<IRepostEventStore, SqliteRepostEventStore>();
+        services.AddSingleton<IPreparedPostStore, SqlitePreparedPostStore>();
+        services.AddSingleton<IInlineMediaUploader, TelegramInlineMediaUploader>();
+        services.AddSingleton<IInlineAnswerer, TelegramInlineAnswerer>();
+        services.AddSingleton<IInlineMessageEditor, TelegramInlineMessageEditor>();
+        services.AddSingleton<ISeenLinkStore, SqliteSeenLinkStore>();
+        services.AddSingleton<IPersonStatsStore, SqlitePersonStatsStore>();
+        services.AddSingleton(sp => StatsTimeZoneResolver.Resolve(
+            sp.GetRequiredService<IOptions<StatsOptions>>().Value.TimeZone,
+            sp.GetRequiredService<ILoggerFactory>().CreateLogger("LeBot.Stats")));
+        services.AddSingleton<IStatsOptOutStore, SqliteStatsOptOutStore>();
+        services.AddSingleton<IChatSettingsStore, SqliteChatSettingsStore>();
+        services.AddSingleton<IRevealableTextStore, SqliteRevealableTextStore>();
 
         services.AddSingleton<ITelegramBotClient>(sp =>
         {
@@ -79,7 +95,12 @@ public static class DependencyInjection
         // One instance behind two doors: the handler sees the port, the sweep service needs the
         // concrete type to call Prune().
         services.AddSingleton<FileSystemMediaCache>();
-        services.AddSingleton<IMediaCache>(sp => sp.GetRequiredService<FileSystemMediaCache>());
+        services.AddSingleton<TelegramMediaVault>();
+        services.AddSingleton<TelegramMediaCache>();
+        // With a storage chat, posts live in Telegram and nothing stays on disk; without one, the disk store.
+        services.AddSingleton<IMediaCache>(sp => sp.GetRequiredService<TelegramMediaVault>().IsConfigured
+            ? sp.GetRequiredService<TelegramMediaCache>()
+            : sp.GetRequiredService<FileSystemMediaCache>());
 
         // Sources Instagram session cookies (via the same YtDlp:CookiesFromBrowser the bot already
         // uses) so the private-API extractor below can authenticate.
@@ -124,7 +145,9 @@ public static class DependencyInjection
         // to record itself.
         services.AddHostedService<RepostDatabaseInitializer>();
 
+        services.AddSingleton<FeedbackRelay>();
         services.AddHostedService<TelegramUpdateDispatcher>();
+        services.AddHostedService<WeeklyDigestService>();
         services.AddHostedService<DownloadsCleanupService>();
         services.AddHostedService<MediaCacheCleanupService>();
         services.AddHostedService<YtDlpUpdateService>();

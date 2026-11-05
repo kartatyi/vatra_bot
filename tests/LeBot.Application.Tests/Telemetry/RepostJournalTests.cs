@@ -25,7 +25,7 @@ public class RepostJournalTests
     {
         await CreateSut().RecordMediaRepostAsync(
             Url, "YtDlpPlatformExtractor", mediaCount: 2, mediaBytes: 2048,
-            elapsed: TimeSpan.FromMilliseconds(1500), chatId: -100123, CancellationToken.None);
+            elapsed: TimeSpan.FromMilliseconds(1500), chatId: -100123, senderId: 555, CancellationToken.None);
 
         await _store.Received(1).AppendAsync(
             Arg.Is<RepostEvent>(e =>
@@ -38,6 +38,7 @@ public class RepostJournalTests
                 && e.ElapsedMs == 1500
                 && e.OccurredAt == Instant
                 && e.BotVersion == "1.2.3"
+                && e.SenderId == 555
                 && e.ChatHash == ChatHasher.Of(-100123)
                 && e.ErrorVariant == null
                 && e.ErrorReason == null),
@@ -60,7 +61,8 @@ public class RepostJournalTests
                 && e.ErrorReason == error.Reason
                 && e.Extractor == "ThreadsEmbedExtractor"
                 && e.MediaCount == 0
-                && e.MediaBytes == null),
+                && e.MediaBytes == null
+                && e.SenderId == null),
             Arg.Any<CancellationToken>());
     }
 
@@ -69,7 +71,7 @@ public class RepostJournalTests
     {
         await CreateSut().RecordTextFallbackAsync(
             Url, "InstagramEmbedExtractor",
-            elapsed: TimeSpan.FromMilliseconds(80), chatId: 7, CancellationToken.None);
+            elapsed: TimeSpan.FromMilliseconds(80), chatId: 7, senderId: null, CancellationToken.None);
 
         await _store.Received(1).AppendAsync(
             Arg.Is<RepostEvent>(e =>

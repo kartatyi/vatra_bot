@@ -7,7 +7,7 @@
 
 A Telegram group bot that re-posts media inline so the chat never has to leave Telegram. Drop a TikTok / Reels / YT-Shorts / Threads / X / Reddit link (anything in yt-dlp's ~1800 sites) → the bot replies with the native video or photo, caption intact.
 
-- **Phase 1 — active.** Detect URLs in any group message, extract media, re-post. Reply with media, else the post's text; when extraction yields neither, stay silent — no "couldn't extract" noise. A post its author wrote as a chain ("1/3", "2/3") arrives whole, in a follow-up message ([ADR 0009](docs/decisions/0009-chained-posts.md)). A link seen in the last 24 h is served from the on-disk cache — no extractor runs at all ([ADR 0007](docs/decisions/0007-media-cache.md)).
+- **Phase 1 — active.** Detect URLs in any group message, extract media, re-post. Reply with media, else the post's text; when extraction yields neither, stay silent — no "couldn't extract" noise (a chat may opt into a 🤷 reaction instead, via `/settings`). A post its author wrote as a chain ("1/3", "2/3") arrives whole, in a follow-up message ([ADR 0009](docs/decisions/0009-chained-posts.md)). A link seen in the last 24 h is served from the on-disk cache — no extractor runs at all ([ADR 0007](docs/decisions/0007-media-cache.md)). How much of the post's text rides along is each chat's call through `/settings`: videos go bare by default with a "📝 Text" button that shows the rest, text-led posts keep their text ([ADR 0011](docs/decisions/0011-per-chat-caption-settings.md)).
 - **Phase 2 — planned.** Conversational layer: per-user dossiers, mention/DM replies. See [ADR 0001](docs/decisions/0001-phase2-llm-provider.md).
 
 Quality bar: **code you'd put on a CV.** Every rule below earns its place by keeping it there.
@@ -20,6 +20,7 @@ Quality bar: **code you'd put on a CV.** Every rule below earns its place by kee
 - Never `--no-verify`, never `--force`, never `--amend` a pushed commit — unless asked in this same turn.
 - **No AI attribution, ever** — no `Co-Authored-By: Claude`, no `Generated with…`. The committer is the human. (Stated once; here is canonical.)
 - **Everything published is in English** — commit message, PR *title and body*, code, comments, docs, ADRs, log templates, issue replies. The chat is a separate channel: whatever language it runs in, that language stops at the repo boundary. (Stated once; here is canonical.)
+  The one exception is the bot's own user-facing copy, which ships in English *and* Ukrainian ([`BotLanguage`](src/LeBot.Infrastructure/Telegram/BotLanguage.cs)): English by default, Ukrainian for a person whose Telegram is set to Ukrainian. Both strings sit side by side in the formatter — `lang.Pick(uk, en)` — never in a separate resource file.
 
 ```
 ## What / Adds the read side to the durable repost journal.   good — the chat was Ukrainian; the PR is not
@@ -181,7 +182,7 @@ yt-dlp knobs ([`YtDlpOptions`](src/LeBot.Infrastructure/Configuration/YtDlpOptio
 }
 ```
 
-Cache knobs ([`MediaCacheOptions`](src/LeBot.Infrastructure/Configuration/MediaCacheOptions.cs), `MediaCache` section) — the store that answers a repeat link without touching the platform:
+Cache knobs ([`MediaCacheOptions`](src/LeBot.Infrastructure/Configuration/MediaCacheOptions.cs), `MediaCache` section) — the store that answers a repeat link without touching the platform. With `Storage:ChatId` set it keeps file ids, not files, and `Directory` / `MaxTotalSizeMb` only govern the disk fallback:
 
 ```jsonc
 "MediaCache": {
@@ -189,6 +190,32 @@ Cache knobs ([`MediaCacheOptions`](src/LeBot.Infrastructure/Configuration/MediaC
   "Directory": "cache",   // beside the exe; keep it off DownloadDirectory, whose sweep empties hourly
   "TtlHours": 24,         // from write, never slides on access — an edited post can repost stale until then
   "MaxTotalSizeMb": 4096  // over the cap, oldest entries are evicted first
+}
+```
+
+Storage knobs ([`StorageOptions`](src/LeBot.Infrastructure/Configuration/StorageOptions.cs), `Storage` section) — the private channel every post's media is uploaded to once and then sent anywhere by file id; it backs the media cache ([ADR 0015](docs/decisions/0015-telegram-media-store.md)) and inline mode ([ADR 0013](docs/decisions/0013-inline-mode.md), which also needs BotFather `/setinline` + `/setinlinefeedback`):
+
+```jsonc
+"Storage": {
+  "ChatId": null   // deployment identity: user-secrets / env only. Unset → the disk cache below, and inline
+                   // mode answers text posts only
+}
+```
+
+Stats knobs ([`StatsOptions`](src/LeBot.Infrastructure/Configuration/StatsOptions.cs), `Stats` section) — the clock `/leaders` badges and `/me` read:
+
+```jsonc
+"Stats": {
+  "TimeZone": "Europe/Kyiv"  // IANA or Windows id; 🦉 "night" is 00:00–05:00 here. Unknown on the host → UTC, with a warning
+}
+```
+
+Feedback knobs ([`FeedbackOptions`](src/LeBot.Infrastructure/Configuration/FeedbackOptions.cs), `Feedback` section) — where `/feedback` lands:
+
+```jsonc
+"Feedback": {
+  "ChatId": null,         // maintainer's chat — deployment identity, local config only; unset → Update:NotifyChatId
+  "CooldownSeconds": 60   // per sender, so one person can't flood the maintainer
 }
 ```
 

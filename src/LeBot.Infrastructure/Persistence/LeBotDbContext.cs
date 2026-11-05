@@ -5,14 +5,27 @@ using Microsoft.EntityFrameworkCore;
 namespace LeBot.Infrastructure.Persistence;
 
 /// <summary>
-/// EF Core context for the durable repost journal. Append-only in practice: the bot only ever inserts
-/// <see cref="RepostEvent"/>s and the dashboard only ever reads rollups, so reads run untracked.
+/// EF Core context for the durable repost journal and the per-chat settings. The journal is append-only
+/// in practice: the bot only ever inserts <see cref="RepostEvent"/>s and the dashboard only ever reads
+/// rollups, so reads run untracked. Settings are the one table the bot updates in place.
 /// The Application's <see cref="RepostEvent"/> record is mapped here (in Infrastructure) via the Fluent
 /// API, keeping persistence attributes out of the Application layer.
 /// </summary>
 public sealed class LeBotDbContext(DbContextOptions<LeBotDbContext> options) : DbContext(options)
 {
     public DbSet<RepostEvent> RepostEvents => Set<RepostEvent>();
+
+    internal DbSet<StatsOptOutRow> StatsOptOuts => Set<StatsOptOutRow>();
+
+    internal DbSet<LinkSightingRow> LinkSightings => Set<LinkSightingRow>();
+
+    internal DbSet<PreparedPostRow> PreparedPosts => Set<PreparedPostRow>();
+
+    internal DbSet<MediaCache.StoredPostRow> StoredPosts => Set<MediaCache.StoredPostRow>();
+
+    internal DbSet<ChatSettingsRow> ChatSettings => Set<ChatSettingsRow>();
+
+    internal DbSet<RevealableTextRow> RevealableTexts => Set<RevealableTextRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -49,5 +62,68 @@ public sealed class LeBotDbContext(DbContextOptions<LeBotDbContext> options) : D
         repostEvent.HasIndex(e => e.OccurredAt);
         repostEvent.HasIndex(e => e.Host);
         repostEvent.HasIndex(e => e.Outcome);
+
+        // The /leaders read: one chat's reposts, grouped by who posted them.
+        repostEvent.HasIndex(e => new { e.ChatHash, e.SenderId });
+
+        var optOut = modelBuilder.Entity<StatsOptOutRow>();
+        optOut.ToTable("StatsOptOuts");
+        optOut.HasKey(o => new { o.ChatHash, o.UserId });
+
+        var chatSettings = modelBuilder.Entity<ChatSettingsRow>();
+        chatSettings.ToTable("ChatSettings");
+        chatSettings.HasKey(s => s.ChatHash);
+        // Text for the same reason as Outcome: a raw SELECT should read "Off", not "0".
+        chatSettings.Property(s => s.VideoCaption).HasConversion<string>().IsRequired();
+        chatSettings.Property(s => s.PostCaption).HasConversion<string>().IsRequired();
+        chatSettings.Property(s => s.UpdatedAt)
+            .HasConversion(
+                value => value.ToUniversalTime().ToString(occurredAtFormat, CultureInfo.InvariantCulture),
+                stored => DateTimeOffset.Parse(stored, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind))
+            .IsRequired();
+
+        var revealable = modelBuilder.Entity<RevealableTextRow>();
+        revealable.ToTable("RevealableTexts");
+        revealable.HasKey(r => new { r.ChatHash, r.MessageId });
+        revealable.Property(r => r.Text).IsRequired();
+        // Same sortable text format as OccurredAt, so the expiry sweep's "<" compares chronologically.
+        revealable.Property(r => r.CreatedAt)
+            .HasConversion(
+                value => value.ToUniversalTime().ToString(occurredAtFormat, CultureInfo.InvariantCulture),
+                stored => DateTimeOffset.Parse(stored, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind))
+            .IsRequired();
+        revealable.HasIndex(r => r.CreatedAt);
+
+        var sighting = modelBuilder.Entity<LinkSightingRow>();
+        sighting.ToTable("LinkSightings");
+        sighting.HasKey(s => s.Id);
+        sighting.HasIndex(s => new { s.ChatHash, s.LinkKey });
+        sighting.HasIndex(s => new { s.ChatHash, s.SenderId });
+        sighting.Property(s => s.SeenAt)
+            .HasConversion(
+                value => value.ToUniversalTime().ToString(occurredAtFormat, CultureInfo.InvariantCulture),
+                stored => DateTimeOffset.Parse(stored, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind))
+            .IsRequired();
+
+        var stored = modelBuilder.Entity<MediaCache.StoredPostRow>();
+        stored.ToTable("StoredPosts");
+        stored.HasKey(p => p.LinkKey);
+        stored.Property(p => p.Document).IsRequired();
+        stored.Property(p => p.StoredAt)
+            .HasConversion(
+                value => value.ToUniversalTime().ToString(occurredAtFormat, CultureInfo.InvariantCulture),
+                parsed => DateTimeOffset.Parse(parsed, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind))
+            .IsRequired();
+        stored.HasIndex(p => p.StoredAt);
+
+        var prepared = modelBuilder.Entity<PreparedPostRow>();
+        prepared.ToTable("PreparedPosts");
+        prepared.HasKey(p => p.LinkKey);
+        prepared.Property(p => p.Kind).HasConversion<string>();
+        prepared.Property(p => p.PreparedAt)
+            .HasConversion(
+                value => value.ToUniversalTime().ToString(occurredAtFormat, CultureInfo.InvariantCulture),
+                stored => DateTimeOffset.Parse(stored, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind))
+            .IsRequired();
     }
 }

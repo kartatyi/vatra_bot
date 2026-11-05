@@ -12,10 +12,10 @@ namespace LeBot.Application.Telemetry;
 public interface IRepostJournal
 {
     /// <summary>Media was extracted and sent.</summary>
-    Task RecordMediaRepostAsync(Uri url, string extractor, int mediaCount, long? mediaBytes, TimeSpan elapsed, long chatId, CancellationToken cancellationToken);
+    Task RecordMediaRepostAsync(Uri url, string extractor, int mediaCount, long? mediaBytes, TimeSpan elapsed, long chatId, long? senderId, CancellationToken cancellationToken);
 
     /// <summary>No media, but the post's text was sent as a fallback reply.</summary>
-    Task RecordTextFallbackAsync(Uri url, string? extractor, TimeSpan elapsed, long chatId, CancellationToken cancellationToken);
+    Task RecordTextFallbackAsync(Uri url, string? extractor, TimeSpan elapsed, long chatId, long? senderId, CancellationToken cancellationToken);
 
     /// <summary>An extractor that claimed the URL failed hard; <paramref name="extractionError"/> carries the why.</summary>
     Task RecordFailureAsync(Uri url, string extractor, ExtractionError extractionError, TimeSpan elapsed, long chatId, CancellationToken cancellationToken);
