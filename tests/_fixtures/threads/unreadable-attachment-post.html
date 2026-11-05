@@ -1,0 +1,14 @@
+<!doctype html>
+<!--
+  A post that carries something the parser has no reader for: a GIF picked from the Giphy
+  picker (giphy_media_info), on a node whose own renditions are empty. It is NOT text-only —
+  Threads renders the GIF's first frame into the og:image card — and the parser must say so
+  instead of quietly offering the card. Whatever attachment shape Meta adds next lands here.
+-->
+<html lang="en">
+<head>
+<meta property="og:image" content="https://scontent.test/social-card.jpg" />
+<script type="application/json" data-sjs>{"require":[["ScheduledServerJS","handle",null,[{"__bbox":{"result":{"data":{"media":{"pk":"777","code":"DbGifOnly01","user":{"username":"reaction.gifs"},"caption":{"text":"mood"},"media_type":19,"carousel_media":null,"image_versions2":{"candidates":[]},"video_versions":null,"giphy_media_info":{"id":"abc123","images":{"fixed_height":{"url":"https://media.giphy.test/abc123/200.gif"}}},"text_post_app_info":{"is_reply":false,"reply_to_author":null,"linked_inline_media":null,"share_info":{"quoted_post":null,"reposted_post":null}}}}}}}]]]}</script>
+</head>
+<body><div id="barcelona-shell"></div></body>
+</html>

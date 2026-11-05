@@ -27,6 +27,14 @@ public sealed record MediaPayload(
     public bool HasMedia => Items.Count > 0;
 
     /// <summary>
+    /// The rest of the post when its author wrote it as a chain — the parts that follow the one the
+    /// link points at, in order. Empty for the ordinary single-message post. These are *not* folded
+    /// into <see cref="Items"/> and <see cref="Description"/>: each part is its own message on the
+    /// platform, and the sender decides how to group them.
+    /// </summary>
+    public IReadOnlyList<PostSegment> FollowUps { get; init; } = [];
+
+    /// <summary>
     /// The text a repost of this payload carries: the description — the post as its author wrote it — or,
     /// failing that, the title, then an "— author" line. Null when there is none of the three. Untrimmed
     /// for length; fitting it to a Telegram limit is the sender's job.

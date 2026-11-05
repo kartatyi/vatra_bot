@@ -2,49 +2,37 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text.RegularExpressions;
 using System.Web;
-using LeBot.Application.Ports;
-using LeBot.Domain.Common;
 using LeBot.Domain.Media;
 using LeBot.Infrastructure.Configuration;
-using LeBot.Infrastructure.MediaExtraction.Threads;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Polly;
 using Polly.Retry;
 
-namespace LeBot.Infrastructure.MediaExtraction.ThreadsEmbed;
+namespace LeBot.Infrastructure.MediaExtraction.Threads;
 
 /// <summary>
-/// First-pass extractor for Threads posts. yt-dlp's Threads extractor only matches
-/// <c>threads.net</c>, but Meta moved the canonical domain to <c>threads.com</c> and the
-/// .net URLs redirect to .com — leaving yt-dlp unable to handle either. Threads exposes
-/// Open Graph metadata to crawler User-Agents (Twitterbot, facebookexternalhit, Googlebot)
-/// even though anonymous browsers see only a logged-out shell. We mimic Twitterbot to pull
-/// out the author, the preview image (which Threads renders the post body into for text-only
-/// posts), and ship them as a single-photo payload.
+/// Reads the <c>og:image</c> Threads exposes to crawler User-Agents (Twitterbot, facebookexternalhit,
+/// Googlebot) even though anonymous browsers see only a logged-out shell — mimicking a crawler is
+/// the whole trick. yt-dlp can't stand in: its Threads extractor matches only <c>threads.net</c>,
+/// and Meta moved the canonical domain to <c>threads.com</c>.
 /// </summary>
-public sealed partial class ThreadsEmbedExtractor : IPlatformExtractor
+internal sealed partial class ThreadsCardLoader : IThreadsCardLoader
 {
-    private static readonly string CrawlerUserAgent = "Twitterbot/1.0";
-
-    [GeneratedRegex(@"<meta\s+property=""og:title""\s+content=""([^""]+)""", RegexOptions.IgnoreCase)]
-    private static partial Regex OgTitlePattern();
+    private const string CrawlerUserAgent = "Twitterbot/1.0";
 
     [GeneratedRegex(@"<meta\s+property=""og:image""\s+content=""([^""]+)""", RegexOptions.IgnoreCase)]
     private static partial Regex OgImagePattern();
 
-    [GeneratedRegex(@"^.*?\(@([\w.]+)\)\s+on\s+Threads", RegexOptions.IgnoreCase)]
-    private static partial Regex AuthorFromOgTitle();
-
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly YtDlpOptions _options;
-    private readonly ILogger<ThreadsEmbedExtractor> _logger;
+    private readonly ILogger<ThreadsCardLoader> _logger;
     private readonly ResiliencePipeline<HttpResponseMessage> _retryPipeline;
 
-    public ThreadsEmbedExtractor(
+    public ThreadsCardLoader(
         IHttpClientFactory httpClientFactory,
         IOptions<YtDlpOptions> options,
-        ILogger<ThreadsEmbedExtractor> logger)
+        ILogger<ThreadsCardLoader> logger)
     {
         _httpClientFactory = httpClientFactory;
         _options = options.Value;
@@ -67,7 +55,7 @@ public sealed partial class ThreadsEmbedExtractor : IPlatformExtractor
                 OnRetry = args =>
                 {
                     _logger.LogWarning(
-                        "Retrying Threads HTTP call (attempt {Attempt} after {DelayMs}ms): {Reason}",
+                        "Retrying Threads card call (attempt {Attempt} after {DelayMs}ms): {Reason}",
                         args.AttemptNumber + 1,
                         args.RetryDelay.TotalMilliseconds,
                         args.Outcome.Exception?.Message ?? $"status {args.Outcome.Result?.StatusCode}");
@@ -77,18 +65,9 @@ public sealed partial class ThreadsEmbedExtractor : IPlatformExtractor
             .Build();
     }
 
-    private static bool IsTransientStatus(HttpStatusCode status) =>
-        status == HttpStatusCode.RequestTimeout
-        || status == HttpStatusCode.TooManyRequests
-        || ((int)status >= 500 && (int)status < 600);
-
-    public bool CanHandle(Uri url) => ThreadsUrl.IsPost(url);
-
-    public async Task<Result<MediaPayload, ExtractionError>> ExtractAsync(
-        Uri url,
-        CancellationToken cancellationToken)
+    public async Task<MediaItem?> LoadAsync(Uri url, CancellationToken cancellationToken)
     {
-        var client = _httpClientFactory.CreateClient(nameof(ThreadsEmbedExtractor));
+        var client = _httpClientFactory.CreateClient(nameof(ThreadsCardLoader));
 
         try
         {
@@ -102,73 +81,29 @@ public sealed partial class ThreadsEmbedExtractor : IPlatformExtractor
 
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Threads page returned HTTP {Status} for {Url}", (int)response.StatusCode, url);
-                return Result<MediaPayload, ExtractionError>.Failure(
-                    new ExtractionError.NetworkFailure(url, $"HTTP {(int)response.StatusCode}"));
+                _logger.LogWarning(
+                    "Threads card page returned HTTP {Status} for {Url}", (int)response.StatusCode, url);
+                return null;
             }
 
             var html = await response.Content.ReadAsStringAsync(cancellationToken);
-
-            var rawTitle = ExtractFirst(html, OgTitlePattern());
-            var rawImage = ExtractFirst(html, OgImagePattern());
-
-            var decodedTitle = DecodeHtml(rawTitle);
-            var imageUrl = DecodeHtml(rawImage);
-            var author = ExtractAuthor(decodedTitle);
-
-            if (string.IsNullOrEmpty(imageUrl))
+            var match = OgImagePattern().Match(html);
+            if (!match.Success)
             {
-                _logger.LogInformation("Threads page for {Url} carried no og:image — falling through to text-only", url);
-                return Result<MediaPayload, ExtractionError>.Success(
-                    new MediaPayload(url, Title: null, Author: author, Items: [], Description: decodedTitle));
+                _logger.LogInformation("Threads page for {Url} carries no og:image card", url);
+                return null;
             }
 
-            var item = await DownloadImageAsync(client, imageUrl, cancellationToken);
-            if (item is null)
-            {
-                _logger.LogWarning("Threads og:image download failed for {Url}", url);
-                return Result<MediaPayload, ExtractionError>.Success(
-                    new MediaPayload(url, Title: null, Author: author, Items: [], Description: decodedTitle));
-            }
-
-            return Result<MediaPayload, ExtractionError>.Success(
-                new MediaPayload(url, Title: null, Author: author, Items: [item], Description: decodedTitle));
+            return await DownloadAsync(client, HttpUtility.HtmlDecode(match.Groups[1].Value), cancellationToken);
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogWarning(ex, "Threads HTTP failure for {Url}", url);
-            return Result<MediaPayload, ExtractionError>.Failure(
-                new ExtractionError.NetworkFailure(url, ex.Message));
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogError(ex, "Unexpected error scraping Threads for {Url}", url);
-            return Result<MediaPayload, ExtractionError>.Failure(
-                new ExtractionError.ToolFailure(ex.Message));
-        }
-    }
-
-    private static string? ExtractFirst(string html, Regex pattern)
-    {
-        var match = pattern.Match(html);
-        return match.Success ? match.Groups[1].Value : null;
-    }
-
-    private static string? DecodeHtml(string? raw)
-        => string.IsNullOrEmpty(raw) ? raw : HttpUtility.HtmlDecode(raw);
-
-    private static string? ExtractAuthor(string? decodedTitle)
-    {
-        if (string.IsNullOrEmpty(decodedTitle))
-        {
+            _logger.LogWarning(ex, "Threads card fetch failed for {Url}", url);
             return null;
         }
-
-        var match = AuthorFromOgTitle().Match(decodedTitle);
-        return match.Success ? match.Groups[1].Value : null;
     }
 
-    private async Task<MediaItem?> DownloadImageAsync(
+    private async Task<MediaItem?> DownloadAsync(
         HttpClient client,
         string imageUrl,
         CancellationToken cancellationToken)
@@ -187,7 +122,8 @@ public sealed partial class ThreadsEmbedExtractor : IPlatformExtractor
 
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("og:image fetch returned HTTP {Status} for {Url}", (int)response.StatusCode, imageUrl);
+                _logger.LogWarning(
+                    "Threads card image returned HTTP {Status} for {Url}", (int)response.StatusCode, imageUrl);
                 return null;
             }
 
@@ -195,7 +131,7 @@ public sealed partial class ThreadsEmbedExtractor : IPlatformExtractor
             if (contentLength is > 0 && contentLength > maxBytes)
             {
                 _logger.LogInformation(
-                    "Skipping Threads image {Url}: predicted size {SizeMb}MB exceeds limit {LimitMb}MB",
+                    "Skipping Threads card {Url}: predicted size {SizeMb}MB exceeds limit {LimitMb}MB",
                     imageUrl, contentLength / (1024 * 1024), _options.MaxFileSizeMb);
                 return null;
             }
@@ -228,10 +164,15 @@ public sealed partial class ThreadsEmbedExtractor : IPlatformExtractor
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogWarning(ex, "Threads image download failed for {Url}", imageUrl);
+            _logger.LogWarning(ex, "Threads card download failed for {Url}", imageUrl);
             return null;
         }
     }
+
+    private static bool IsTransientStatus(HttpStatusCode status) =>
+        status == HttpStatusCode.RequestTimeout
+        || status == HttpStatusCode.TooManyRequests
+        || ((int)status >= 500 && (int)status < 600);
 
     private static string? GuessExtension(MediaTypeHeaderValue? contentType) => contentType?.MediaType?.ToLowerInvariant() switch
     {

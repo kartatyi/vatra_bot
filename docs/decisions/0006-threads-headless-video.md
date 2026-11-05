@@ -1,7 +1,13 @@
 # 0006. Threads Video via a Headless Browser (CDP)
 
 Date: 2026-06-29
-Status: Accepted
+Status: Superseded by 0008
+
+> **Superseded on 2026-08-06 by [ADR 0008](0008-threads-post-payload.md).** Reading the first
+> `<video>` in the page turned out to repost media belonging to *other* posts on it, and the media
+> the "dead ends" table below declared unreachable is in fact server-rendered — to requests carrying
+> a full set of browser navigation headers, which that investigation didn't send. The CDP client and
+> the system-browser packaging stance survive intact; only what we ask the page for changed.
 
 ## Context
 

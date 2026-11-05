@@ -78,6 +78,29 @@ public sealed class FileSystemMediaCacheTests : IDisposable
     }
 
     [Fact]
+    public async Task SaveAsync_ChainedPost_ReplaysEveryPartOnAHit()
+    {
+        var sut = CreateSut();
+        var payload = new MediaPayload(Url, null, null, [Video(WriteDownload("clip.mp4", "bytes"))])
+        {
+            FollowUps =
+            [
+                new PostSegment("part two", []),
+                new PostSegment("part three", [Photo(WriteDownload("part3.jpg", "pixels"))]),
+            ],
+        };
+
+        await sut.SaveAsync(payload, "ThreadsPostExtractor", CancellationToken.None);
+        var hit = await sut.TryGetAsync(Url, CancellationToken.None);
+
+        hit!.Payload.FollowUps.Select(segment => segment.Text).Should().Equal("part two", "part three");
+        var restored = hit.Payload.FollowUps[1].Items.Should().ContainSingle().Subject;
+        File.ReadAllText(restored.FilePath).Should().Be("pixels");
+        // The part's own copy, not the main post's: same index, different message.
+        restored.FilePath.Should().NotBe(hit.Payload.Items[0].FilePath);
+    }
+
+    [Fact]
     public async Task TryGetAsync_UrlNeverSeen_IsAMiss()
     {
         var hit = await CreateSut().TryGetAsync(Url, CancellationToken.None);
@@ -281,6 +304,9 @@ public sealed class FileSystemMediaCacheTests : IDisposable
 
     private static MediaItem Video(string path) =>
         new(path, MediaKind.Video, "video/mp4", null, 5);
+
+    private static MediaItem Photo(string path) =>
+        new(path, MediaKind.Photo, "image/jpeg", null, null);
 
     private string WriteDownload(string name, string content)
     {

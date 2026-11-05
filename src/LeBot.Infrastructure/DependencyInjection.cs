@@ -7,7 +7,6 @@ using LeBot.Infrastructure.MediaCache;
 using LeBot.Infrastructure.MediaExtraction.AutoRia;
 using LeBot.Infrastructure.MediaExtraction.Instagram;
 using LeBot.Infrastructure.MediaExtraction.Threads;
-using LeBot.Infrastructure.MediaExtraction.ThreadsEmbed;
 using LeBot.Infrastructure.MediaExtraction.YtDlp;
 using LeBot.Infrastructure.Persistence;
 using LeBot.Infrastructure.Releases;
@@ -108,9 +107,14 @@ public static class DependencyInjection
         services.AddSingleton<IBrowserCookieJarReader, YtDlpCookieJarReader>();
         services.AddSingleton<IInstagramCookieProvider, YtDlpCookieProvider>();
 
-        // Drives a headless system browser (Chrome/Edge) over the DevTools Protocol to recover the
-        // client-side-rendered video URL on Threads posts (see ADR 0006).
-        services.AddSingleton<IBrowserVideoResolver, ChromeDevToolsVideoResolver>();
+        // Drives a headless system browser (Chrome/Edge) over the DevTools Protocol for the Threads
+        // posts whose payload a plain fetch didn't get served (see ADR 0008).
+        services.AddSingleton<IBrowserPayloadLoader, ChromeDevToolsPayloadLoader>();
+
+        // Fetches the og:image card Threads renders for crawlers. ThreadsPostExtractor asks for it
+        // only once the payload has shown the post to be text-only — the one post the card is
+        // honest about (see ADR 0010).
+        services.AddSingleton<IThreadsCardLoader, ThreadsCardLoader>();
 
         // Order matters: extractors are tried in the order they're registered. The narrow extractors
         // claim URL families that yt-dlp can't serve (Instagram photo posts / carousels, Threads
@@ -118,11 +122,11 @@ public static class DependencyInjection
         // before yt-dlp wastes a process spawn on the same URL. When they return nothing useful the
         // handler falls through to YtDlpPlatformExtractor, which handles everything else.
         //
-        // ThreadsVideoExtractor precedes ThreadsEmbedExtractor: it claims video posts (returning the
-        // real clip), and declines photo/text posts so the embed extractor's og:image still serves.
+        // ThreadsPostExtractor is the only Threads extractor: real media from the post's payload,
+        // the rendered card for text-only posts, and a loud failure — never the card — for a shape
+        // it can't read (see ADR 0010).
         services.AddSingleton<IPlatformExtractor, InstagramApiExtractor>();
-        services.AddSingleton<IPlatformExtractor, ThreadsVideoExtractor>();
-        services.AddSingleton<IPlatformExtractor, ThreadsEmbedExtractor>();
+        services.AddSingleton<IPlatformExtractor, ThreadsPostExtractor>();
         // auto.ria isn't in yt-dlp's site list; this extractor reposts an advert's photo gallery with
         // a spec caption. It claims only auto.ria advert URLs, so ordering ahead of yt-dlp is harmless.
         services.AddSingleton<IPlatformExtractor, AutoRiaExtractor>();

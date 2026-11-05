@@ -1,0 +1,17 @@
+<!doctype html>
+<!--
+  A text post (media_type 19) whose only content is a clip attached "inline" — the shape Threads
+  gives a post that shares an Instagram reel. The post node itself describes no media: renditions
+  are null or empty. The clip, its poster and its author live one level down, under
+  text_post_app_info.linked_inline_media, in the same media-node shape as a post.
+
+  Trimmed from a real page (2026-09-03). Reading only the node's own renditions makes this look
+  text-only, and the og:image card Threads renders for it is a collage — that is the bug.
+-->
+<html lang="en">
+<head>
+<meta property="og:image" content="https://scontent.test/social-card.jpg" />
+<script type="application/json" data-sjs>{"require":[["ScheduledServerJS","handle",null,[{"__bbox":{"result":{"data":{"media":{"pk":"555","code":"DbInlineReel","user":{"username":"nissalorraine"},"caption":{"text":"😍"},"media_type":19,"carousel_media":null,"image_versions2":{"candidates":[]},"video_versions":null,"giphy_media_info":null,"text_post_app_info":{"is_reply":false,"reply_to_author":null,"link_preview_attachment":{"display_url":"instagram.com","image_url":"https://cdn.test/reel-preview.jpg","title":"Found in Georgia, USA","url":"https://www.instagram.com/reel/DcyvKErgvqq/"},"linked_inline_media":{"media_type":2,"pk":"556","code":"DcyvKErgvqq","user":{"username":"whiitetail"},"caption":null,"carousel_media":null,"image_versions2":{"candidates":[{"width":720,"height":1280,"url":"https://cdn.test/reel-poster-720.jpg"},{"width":480,"height":853,"url":"https://cdn.test/reel-poster-480.jpg"}]},"video_versions":[{"type":101,"url":"https://cdn.test/reel-progressive.mp4"},{"type":102,"url":"https://cdn.test/reel-dash.mp4"}]},"share_info":{"quoted_post":null,"reposted_post":null}}}}}}}]]]}</script>
+</head>
+<body><div id="barcelona-shell"></div></body>
+</html>
