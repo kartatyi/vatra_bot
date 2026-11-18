@@ -63,6 +63,38 @@ public class YtDlpPlatformExtractorLiveTests
     }
 
     [Fact]
+    public void ResolveFfmpegPath_NotConfigured_FindsTheOneBesideYtDlp()
+    {
+        var dir = Directory.CreateTempSubdirectory("lebot-ffmpeg-").FullName;
+        var ffmpeg = Path.Combine(dir, OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg");
+        File.WriteAllText(ffmpeg, string.Empty);
+
+        var path = YtDlpPlatformExtractor.ResolveFfmpegPath(new YtDlpOptions { BinaryPath = Path.Combine(dir, "yt-dlp.exe") });
+
+        path.Should().Be(ffmpeg);
+        Directory.Delete(dir, recursive: true);
+    }
+
+    [Fact]
+    public void ResolveFfmpegPath_NoneAnywhere_IsNull()
+    {
+        var dir = Directory.CreateTempSubdirectory("lebot-ffmpeg-").FullName;
+
+        var path = YtDlpPlatformExtractor.ResolveFfmpegPath(new YtDlpOptions { BinaryPath = Path.Combine(dir, "yt-dlp.exe") });
+
+        path.Should().BeNull();
+        Directory.Delete(dir, recursive: true);
+    }
+
+    [Fact]
+    public void ResolveFfmpegPath_Configured_WinsEvenIfMissing()
+    {
+        var path = YtDlpPlatformExtractor.ResolveFfmpegPath(new YtDlpOptions { FfmpegPath = @"C:\tools\ffmpeg.exe" });
+
+        path.Should().Be(@"C:\tools\ffmpeg.exe");
+    }
+
+    [Fact]
     public void LiveClipFormat_CapsTheRecordingAt480p()
     {
         YtDlpPlatformExtractor.LiveClipFormat.Should().StartWith("bv*[height<=480]+ba");

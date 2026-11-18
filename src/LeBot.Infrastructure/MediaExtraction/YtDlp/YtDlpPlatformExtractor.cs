@@ -60,9 +60,28 @@ public sealed partial class YtDlpPlatformExtractor : IPlatformExtractor
 
         if (!string.IsNullOrEmpty(_options.FfmpegPath))
         {
-            _ffmpegPath = ExecutablePathResolver.Resolve(_options.FfmpegPath);
-            _ytdl.FFmpegPath = _ffmpegPath;
+            _ytdl.FFmpegPath = ExecutablePathResolver.Resolve(_options.FfmpegPath);
         }
+
+        _ffmpegPath = ResolveFfmpegPath(_options);
+    }
+
+    /// <summary>
+    /// The ffmpeg a live clip is cut and encoded with: <see cref="YtDlpOptions.FfmpegPath"/> when set, else
+    /// the ffmpeg beside the yt-dlp binary — where <c>tools/fetch-tools.ps1</c> puts it and where yt-dlp
+    /// finds it unaided. Null when neither exists.
+    /// </summary>
+    internal static string? ResolveFfmpegPath(YtDlpOptions options)
+    {
+        if (!string.IsNullOrEmpty(options.FfmpegPath))
+        {
+            return ExecutablePathResolver.Resolve(options.FfmpegPath);
+        }
+
+        var beside = Path.Combine(
+            Path.GetDirectoryName(ExecutablePathResolver.Resolve(options.BinaryPath)) ?? string.Empty,
+            OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg");
+        return File.Exists(beside) ? beside : null;
     }
 
     public bool CanHandle(Uri url)
