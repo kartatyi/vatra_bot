@@ -112,8 +112,9 @@ public sealed class HandleIncomingMessageHandler(
     /// <summary>
     /// Runs the extractor chain for a cache miss and replies with the first thing worth sending —
     /// media, else text — or stays silent. Every outcome is journalled. Returns true when an extractor
-    /// took the link on and nothing came of it — not when no extractor claimed it at all, which is the
-    /// everyday case for a news or GitHub link and no failure.
+    /// took the link on and nothing came of it — including text this chat's settings leave unsaid — but
+    /// not when no extractor claimed it at all, which is the everyday case for a news or GitHub link and
+    /// no failure.
     /// </summary>
     private async Task<bool> ExtractAndReplyAsync(
         IncomingMessage message,
@@ -184,8 +185,24 @@ public sealed class HandleIncomingMessageHandler(
 
         if (textFallback is { } fallback)
         {
+            // Cached whole, like media: a chat whose settings keep this text gets it from there.
             await cache.SaveAsync(fallback.Payload, fallback.Extractor, cancellationToken);
-            await ReplyWithTextAsync(message, settings.ShapeCaption(fallback.Payload), cancellationToken);
+            var shaped = settings.ShapeCaption(fallback.Payload);
+            if (shaped.Body is null)
+            {
+                // A video-first post whose video didn't come, in a chat that keeps video text off: the
+                // description alone is no repost, so this is a failure like any other link that yielded
+                // nothing — silent, or a shrug where the chat opted in.
+                await journal.RecordNothingExtractedAsync(
+                    url, fallback.Extractor,
+                    timeProvider.GetElapsedTime(startedAt), message.ChatId, cancellationToken);
+                logger.LogInformation(
+                    "No media from {Url} and chat {ChatId} keeps its text off — staying silent",
+                    url, message.ChatId);
+                return true;
+            }
+
+            await ReplyWithTextAsync(message, shaped, cancellationToken);
             metrics.RecordTextRepost(fallback.Extractor);
             await journal.RecordTextFallbackAsync(
                 url, fallback.Extractor,
@@ -218,8 +235,10 @@ public sealed class HandleIncomingMessageHandler(
 
     /// <summary>
     /// Replays a stored repost when the URL has been handled before. Returns false on a miss — and
-    /// also for the pathological case of a stored payload with nothing left to say, which then falls
-    /// through to a normal extraction.
+    /// also when the stored payload has nothing to say to this chat: no media and no text (pathological),
+    /// or only the text of a video post whose video never came, which this chat's settings keep off.
+    /// Either falls through to a normal extraction, which journals and reacts to the outcome like any
+    /// other — and gives a passing failure, such as a YouTube 403, its chance to come back as the video.
     /// </summary>
     private async Task<bool> TryServeFromCacheAsync(
         IncomingMessage message,
@@ -242,9 +261,9 @@ public sealed class HandleIncomingMessageHandler(
                 url, CacheExtractorName, cached.Payload.Items.Count, TotalBytes(cached.Payload),
                 timeProvider.GetElapsedTime(startedAt), message.ChatId, message.SenderId, cancellationToken);
         }
-        else if (HasReplyableText(cached.Payload))
+        else if (HasReplyableText(cached.Payload) && settings.ShapeCaption(cached.Payload) is { Body: not null } shaped)
         {
-            await ReplyWithTextAsync(message, settings.ShapeCaption(cached.Payload), cancellationToken);
+            await ReplyWithTextAsync(message, shaped, cancellationToken);
             metrics.RecordTextRepost(cached.Extractor);
             await journal.RecordTextFallbackAsync(
                 url, CacheExtractorName,

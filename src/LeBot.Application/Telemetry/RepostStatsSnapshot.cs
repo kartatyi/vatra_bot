@@ -10,7 +10,7 @@ namespace LeBot.Application.Telemetry;
 /// <param name="MediaReposts">URLs that produced media sent to the chat.</param>
 /// <param name="TextFallbacks">URLs that produced a text reply when no media was available.</param>
 /// <param name="Failures">URLs an extractor claimed but failed hard on — the "why it breaks" signal.</param>
-/// <param name="NothingExtracted">URLs an extractor claimed but returned an empty payload for.</param>
+/// <param name="NothingExtracted">URLs an extractor claimed but produced nothing to send for (see <see cref="RepostOutcome.NothingExtracted"/>).</param>
 /// <param name="NoExtractor">URLs no extractor ultimately claimed (all returned UnsupportedPlatform).</param>
 /// <param name="DistinctChats">Number of distinct (hashed) chats seen in the window.</param>
 /// <param name="FirstEventAt">When the earliest event in the window occurred; null when the window is empty.</param>

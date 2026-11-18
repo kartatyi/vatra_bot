@@ -44,14 +44,22 @@ public sealed record ChatSettings(
     private static readonly string[] TextLedHosts =
         ["threads.net", "threads.com", "x.com", "twitter.com", "reddit.com", "redd.it"];
 
+    /// <summary>
+    /// Hosts whose posts are video-led even when the video couldn't be fetched: there the text is the
+    /// video's description — links, timestamps, sponsor lines — not a post anyone came to read.
+    /// </summary>
+    private static readonly string[] VideoFirstHosts = ["youtube.com", "youtu.be", "tiktok.com"];
+
     public CaptionMode PostCaption { get; } = PostCaption != CaptionMode.Off
         ? PostCaption
         : throw new ArgumentOutOfRangeException(nameof(PostCaption), PostCaption, "A text-led post can't drop its text.");
 
     /// <summary>
     /// The mode for <paramref name="payload"/>: <see cref="VideoCaption"/> when the post is video-led —
-    /// it carries a video and doesn't come from a text-first platform — otherwise <see cref="PostCaption"/>.
-    /// A photo post counts as text-led: its caption is usually what the photos are about.
+    /// it carries a video and doesn't come from a text-first platform, or it comes from a video-first
+    /// platform (YouTube, TikTok) with no media at all because the video couldn't be fetched — otherwise
+    /// <see cref="PostCaption"/>. A photo post counts as text-led: its caption is usually what the photos
+    /// are about.
     /// </summary>
     public CaptionMode ModeFor(MediaPayload payload) =>
         IsVideoLed(payload) ? VideoCaption : PostCaption;
@@ -61,7 +69,8 @@ public sealed record ChatSettings(
     /// its text run through <see cref="CaptionShortener"/> under <see cref="CaptionMode.Brief"/>, and stripped
     /// of every caption source — title and author included — under <see cref="CaptionMode.Off"/>. When that
     /// changed the text and <see cref="OfferFullText"/> is on, the original <see cref="MediaPayload.Body"/>
-    /// rides along as <see cref="MediaPayload.RevealableText"/>. The media and file ownership never change.
+    /// rides along as <see cref="MediaPayload.RevealableText"/> — unless neither media nor text is left, since
+    /// then no message goes out to carry the button. The media and file ownership never change.
     /// </summary>
     public MediaPayload ShapeCaption(MediaPayload payload)
     {
@@ -77,16 +86,22 @@ public sealed record ChatSettings(
             _ => payload with { Title = null, Description = null, Author = null },
         };
 
-        return OfferFullText && payload.Body is { } full && shaped.Body != full
+        var sendsSomething = shaped.HasMedia || shaped.Body is not null;
+        return OfferFullText && sendsSomething && payload.Body is { } full && shaped.Body != full
             ? shaped with { RevealableText = full }
             : shaped;
     }
 
+    // A media-less post from a video-first host is the video that didn't come, not a text post: under the
+    // default Off it has nothing left to say, so the chat gets silence instead of the description. Photos
+    // from those hosts (a TikTok slideshow) stay text-led, like any photo post.
     private static bool IsVideoLed(MediaPayload payload) =>
-        payload.Items.Any(item => item.Kind == MediaKind.Video) && !IsTextLedHost(payload.SourceUrl);
+        payload.HasMedia
+            ? payload.Items.Any(item => item.Kind == MediaKind.Video) && !IsOnHost(payload.SourceUrl, TextLedHosts)
+            : IsOnHost(payload.SourceUrl, VideoFirstHosts);
 
-    private static bool IsTextLedHost(Uri url) =>
-        TextLedHosts.Any(host =>
+    private static bool IsOnHost(Uri url, string[] hosts) =>
+        hosts.Any(host =>
             url.Host.Equals(host, StringComparison.OrdinalIgnoreCase) ||
             url.Host.EndsWith("." + host, StringComparison.OrdinalIgnoreCase));
 }

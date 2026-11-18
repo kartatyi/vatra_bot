@@ -15,7 +15,7 @@ So one global switch can't be right, and neither can a hard-coded rule: some gro
 
 `ChatSettings` (Domain) holds a `CaptionMode` — `Off` / `Brief` / `Full` — for **video-led** posts and one for **text-led** posts:
 
-- **Video-led:** the payload carries a video and doesn't come from a text-first host. Defaults to `Off`.
+- **Video-led:** the payload carries a video and doesn't come from a text-first host — or it comes from a video-first host with no media at all (see the [addendum](#addendum-2026-11-18-a-video-post-without-its-video)). Defaults to `Off`.
 - **Text-led:** everything else — Threads, X and Reddit even when they carry a video, photo posts, text-only replies. Defaults to `Full`. `Off` is not allowed here: a text-led post without its text has nothing worth reposting.
 
 The split is by what the post leads with, not by platform alone, because one platform can be either: an Instagram reel is video-led, an Instagram photo post is text-led.
@@ -53,3 +53,13 @@ The bot's rule is to stay silent when a link yields nothing. A fourth `/settings
 - Every repost costs one indexed SQLite read for the settings, and a hidden caption one write.
 - The text-first host list (`threads`, `x`/`twitter`, `reddit`) lives in Domain; a new text-first platform means adding it there.
 - The keyboard copy is English, like the bot's other replies. Localizing it is a separate change.
+
+## Addendum (2026-11-18): a video post without its video
+
+When yt-dlp can't deliver a YouTube video — predicted over the 50 MB cap, a 403, a live stream — it still returns the title and description. The split above only called a post video-led when a video was actually there, so that payload fell to the text-led `Full` and the chat got the whole description: up to 4096 characters of links, timestamps, sponsor lines and hashtags in place of the video. 26 of the 29 text fallbacks journalled since 2026-10-15 were YouTube links, and to the chat they read as a wall of text where a video should have been.
+
+- **Video-first hosts.** YouTube (`youtube.com` and its subdomains, `youtu.be`) and TikTok (`tiktok.com`, including `vt.`/`vm.`) sit in Domain beside the text-first list. A post from them with no media at all is video-led, so it gets the video caption mode. A photo post from them — a TikTok slideshow — stays text-led, like any photo post.
+- **Nothing to say → silence.** Under the default `Off` that leaves no text, so nothing is sent: no empty message and no "📝 Text" button without a message to sit under. It is journalled as `NothingExtracted`, not `TextFallback`, and reacts like any other failure — silent, or 🤷 where the chat opted in. Telegram's own link preview already shows the title and thumbnail.
+- **A chat's own choice still wins.** A chat that set video text to `Brief` or `Full` gets the description, shaped as it asked.
+- **The cache keeps the post whole**, as for media. Where it holds only text this chat won't be sent, the link is treated as a miss and extracted again, so a passing failure gets its chance to come back as the video.
+- Threads, X and Reddit keep their text exactly as before; inline mode (ADR 0013) applies no chat settings and is unchanged.

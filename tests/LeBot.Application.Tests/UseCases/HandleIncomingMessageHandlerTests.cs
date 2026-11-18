@@ -412,6 +412,154 @@ public class HandleIncomingMessageHandlerTests
             123L, 7, payload, Arg.Any<CancellationToken>());
     }
 
+    // What yt-dlp hands back when it can't deliver a YouTube video (over the size cap, a 403, a live
+    // stream): no media, only the video's title and description.
+    private static MediaPayload VideoFirstPostWithoutMedia(Uri url) =>
+        new(url, "Full build walkthrough", "channel", [], "00:00 intro\n01:12 sponsor https://example.com #build");
+
+    [Fact]
+    public async Task HandleAsync_VideoFirstPostWithoutMedia_SendsNothing()
+    {
+        var url = new Uri("https://www.youtube.com/watch?v=abc");
+        ArrangeExtraction(url, VideoFirstPostWithoutMedia(url));
+        _settings.GetAsync(123L, Arg.Any<CancellationToken>()).Returns(ChatSettings.Default);
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        await _messenger.DidNotReceiveWithAnyArgs().ReplyWithTextAsync(default, default, default!, default);
+        await _messenger.DidNotReceiveWithAnyArgs().ReplyWithMediaAsync(default, default, default!, default);
+        await _revealable.DidNotReceiveWithAnyArgs().SaveAsync(default, default, default!, default);
+    }
+
+    [Fact]
+    public async Task HandleAsync_VideoFirstPostWithoutMedia_JournalsNothingExtractedNotTextFallback()
+    {
+        var url = new Uri("https://youtu.be/abc");
+        ArrangeExtraction(url, VideoFirstPostWithoutMedia(url));
+        _settings.GetAsync(123L, Arg.Any<CancellationToken>()).Returns(ChatSettings.Default);
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        await _journal.Received(1).RecordNothingExtractedAsync(
+            url, _extractor.GetType().Name, Arg.Any<TimeSpan>(), 123L, Arg.Any<CancellationToken>());
+        await _journal.DidNotReceiveWithAnyArgs().RecordTextFallbackAsync(default!, default, default, default, default, default);
+        _metrics.TextReposts.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData(true, LinkReaction.Failed)]
+    [InlineData(false, null)]
+    public async Task HandleAsync_VideoFirstPostWithoutMedia_ShrugsOnlyWhereTheChatOptedIn(bool shrug, LinkReaction? expected)
+    {
+        var url = new Uri("https://www.youtube.com/live/abc");
+        ArrangeExtraction(url, VideoFirstPostWithoutMedia(url));
+        _settings.GetAsync(123L, Arg.Any<CancellationToken>())
+            .Returns(ChatSettings.Default with { ShrugOnFailure = shrug });
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        await _messenger.Received(1).SetReactionAsync(123L, 7, expected, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleAsync_VideoFirstPostWithoutMedia_IsStillCachedWhole()
+    {
+        var url = new Uri("https://www.youtube.com/watch?v=abc");
+        var payload = VideoFirstPostWithoutMedia(url);
+        ArrangeExtraction(url, payload);
+        _settings.GetAsync(123L, Arg.Any<CancellationToken>()).Returns(ChatSettings.Default);
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        // Another chat may show video text; the cache keeps the post whole, as it does for media.
+        await _cache.Received(1).SaveAsync(payload, _extractor.GetType().Name, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleAsync_VideoFirstPostWithoutMedia_ChatThatShowsVideoText_SendsTheText()
+    {
+        var url = new Uri("https://www.youtube.com/watch?v=abc");
+        var payload = VideoFirstPostWithoutMedia(url);
+        ArrangeExtraction(url, payload);
+        _settings.GetAsync(123L, Arg.Any<CancellationToken>())
+            .Returns(new ChatSettings(CaptionMode.Full, CaptionMode.Full));
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        await _messenger.Received(1).ReplyWithTextAsync(123L, 7, payload, Arg.Any<CancellationToken>());
+        await _journal.Received(1).RecordTextFallbackAsync(
+            url, Arg.Any<string?>(), Arg.Any<TimeSpan>(), 123L, 555L, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleAsync_TextFirstPostWithoutMedia_UnderDefaultSettings_SendsItsText()
+    {
+        var url = new Uri("https://www.threads.com/@user/post/1");
+        var payload = new MediaPayload(url, null, "user", [], "the post");
+        ArrangeExtraction(url, payload);
+        _settings.GetAsync(123L, Arg.Any<CancellationToken>()).Returns(ChatSettings.Default);
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        await _messenger.Received(1).ReplyWithTextAsync(123L, 7, payload, Arg.Any<CancellationToken>());
+        await _journal.Received(1).RecordTextFallbackAsync(
+            url, Arg.Any<string?>(), Arg.Any<TimeSpan>(), 123L, 555L, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleAsync_CachedVideoFirstPostWithoutMedia_TriesTheExtractorAgain()
+    {
+        var url = new Uri("https://www.youtube.com/watch?v=abc");
+        var stored = VideoFirstPostWithoutMedia(url) with { RetainFiles = true };
+        var fresh = VideoPayload(url);
+        ArrangeExtraction(url, fresh);
+        _cache.TryGetAsync(url, Arg.Any<CancellationToken>()).Returns(new CachedRepost(stored, "YtDlpPlatformExtractor"));
+        _settings.GetAsync(123L, Arg.Any<CancellationToken>()).Returns(ChatSettings.Default);
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        // Nothing stored is worth sending this chat, so the link gets a fresh go — a passing 403 may be over.
+        await _messenger.Received(1).ReplyWithMediaAsync(123L, 7, Arg.Is<MediaPayload>(p => p.HasMedia), Arg.Any<CancellationToken>());
+        await _messenger.DidNotReceiveWithAnyArgs().ReplyWithTextAsync(default, default, default!, default);
+        _metrics.CacheHits.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task HandleAsync_CachedVideoFirstPostWithoutMedia_StillNoMedia_StaysSilent()
+    {
+        var url = new Uri("https://www.youtube.com/watch?v=abc");
+        var payload = VideoFirstPostWithoutMedia(url);
+        ArrangeExtraction(url, payload);
+        _cache.TryGetAsync(url, Arg.Any<CancellationToken>())
+            .Returns(new CachedRepost(payload with { RetainFiles = true }, "YtDlpPlatformExtractor"));
+        _settings.GetAsync(123L, Arg.Any<CancellationToken>()).Returns(ChatSettings.Default);
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        await _messenger.DidNotReceiveWithAnyArgs().ReplyWithTextAsync(default, default, default!, default);
+        await _revealable.DidNotReceiveWithAnyArgs().SaveAsync(default, default, default!, default);
+        await _journal.Received(1).RecordNothingExtractedAsync(
+            url, _extractor.GetType().Name, Arg.Any<TimeSpan>(), 123L, Arg.Any<CancellationToken>());
+        await _journal.DidNotReceiveWithAnyArgs().RecordTextFallbackAsync(default!, default, default, default, default, default);
+    }
+
+    [Fact]
+    public async Task HandleAsync_CachedVideoFirstPostWithoutMedia_ChatThatShowsVideoText_GetsItFromTheCache()
+    {
+        var url = new Uri("https://www.youtube.com/watch?v=abc");
+        var stored = VideoFirstPostWithoutMedia(url) with { RetainFiles = true };
+        _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
+        _extractor.CanHandle(url).Returns(true);
+        _cache.TryGetAsync(url, Arg.Any<CancellationToken>()).Returns(new CachedRepost(stored, "YtDlpPlatformExtractor"));
+        _settings.GetAsync(123L, Arg.Any<CancellationToken>())
+            .Returns(new ChatSettings(CaptionMode.Full, CaptionMode.Full));
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        await _messenger.Received(1).ReplyWithTextAsync(123L, 7, stored, Arg.Any<CancellationToken>());
+        await _extractor.DidNotReceiveWithAnyArgs().ExtractAsync(default!, default);
+    }
+
     [Fact]
     public async Task HandleAsync_ExtractorReturnsUnsupportedPlatform_StaysSilent()
     {

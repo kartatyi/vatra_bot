@@ -47,10 +47,40 @@ public class ChatSettingsTests
         Settings.ModeFor(payload).Should().Be(CaptionMode.Full);
     }
 
-    [Fact]
-    public void ModeFor_TextOnlyPayload_UsesPostCaption()
+    [Theory]
+    [InlineData("https://www.youtube.com/watch?v=abc")]
+    [InlineData("https://m.youtube.com/watch?v=abc")]
+    [InlineData("https://music.youtube.com/watch?v=abc")]
+    [InlineData("https://www.youtube.com/live/abc")]
+    [InlineData("https://youtube.com/shorts/abc")]
+    [InlineData("https://youtu.be/abc")]
+    [InlineData("https://www.tiktok.com/@a/video/1")]
+    [InlineData("https://vt.tiktok.com/ZSabc/")]
+    [InlineData("https://vm.tiktok.com/ZMabc/")]
+    public void ModeFor_NoMediaFromVideoFirstPlatform_UsesVideoCaption(string url)
     {
-        var payload = Payload("https://www.tiktok.com/@a/video/1");
+        var payload = Payload(url) with { Description = "the video's description" };
+
+        Settings.ModeFor(payload).Should().Be(CaptionMode.Brief);
+    }
+
+    [Theory]
+    [InlineData("https://www.threads.com/@a/post/1")]
+    [InlineData("https://x.com/a/status/1")]
+    [InlineData("https://www.reddit.com/r/a/comments/1")]
+    [InlineData("https://www.instagram.com/p/abc")]
+    [InlineData("https://notyoutube.com/watch?v=abc")]
+    public void ModeFor_NoMediaFromAnyOtherHost_UsesPostCaption(string url)
+    {
+        var payload = Payload(url) with { Description = "the post" };
+
+        Settings.ModeFor(payload).Should().Be(CaptionMode.Full);
+    }
+
+    [Fact]
+    public void ModeFor_PhotoPostFromVideoFirstPlatform_UsesPostCaption()
+    {
+        var payload = Payload("https://www.tiktok.com/@a/photo/1", MediaKind.Photo, MediaKind.Photo);
 
         Settings.ModeFor(payload).Should().Be(CaptionMode.Full);
     }
@@ -140,6 +170,42 @@ public class ChatSettingsTests
         var payload = Payload("https://youtube.com/shorts/x", MediaKind.Video) with { Title = "How to fold a shirt" };
 
         Settings.ShapeCaption(payload).Description.Should().Be("How to fold a shirt");
+    }
+
+    [Fact]
+    public void ShapeCaption_DefaultOnVideoFirstPostWithoutMedia_LeavesNothingToSend()
+    {
+        var payload = Payload("https://www.youtube.com/watch?v=abc") with
+        {
+            Title = "Full build walkthrough",
+            Description = "00:00 intro\n01:12 sponsor https://example.com #build",
+            Author = "channel",
+        };
+
+        var shaped = ChatSettings.Default.ShapeCaption(payload);
+
+        shaped.Body.Should().BeNull();
+        shaped.RevealableText.Should().BeNull();
+    }
+
+    [Fact]
+    public void ShapeCaption_VideoFullOnVideoFirstPostWithoutMedia_KeepsTheText()
+    {
+        var payload = Payload("https://youtu.be/abc") with { Title = "Full build walkthrough", Description = "the description" };
+
+        var shaped = new ChatSettings(CaptionMode.Full, CaptionMode.Full).ShapeCaption(payload);
+
+        shaped.Should().BeSameAs(payload);
+    }
+
+    [Fact]
+    public void ShapeCaption_DefaultOnTextFirstPostWithoutMedia_KeepsTheText()
+    {
+        var payload = Payload("https://www.threads.com/@a/post/1") with { Description = "the post" };
+
+        var shaped = ChatSettings.Default.ShapeCaption(payload);
+
+        shaped.Should().BeSameAs(payload);
     }
 
     [Fact]

@@ -17,7 +17,10 @@ public enum RepostOutcome
     /// <summary>An extractor that claimed the URL reported a hard error (the "why it breaks" signal).</summary>
     Failure,
 
-    /// <summary>An extractor claimed the URL but produced an empty payload — no media, no text.</summary>
+    /// <summary>
+    /// An extractor claimed the URL but produced nothing to send: an empty payload, or a video post's text
+    /// without its video in a chat whose settings keep that text off.
+    /// </summary>
     NothingExtracted,
 
     /// <summary>Extractors ran but none claimed the URL as theirs (all returned UnsupportedPlatform).</summary>

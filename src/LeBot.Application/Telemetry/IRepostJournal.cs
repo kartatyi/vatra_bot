@@ -20,7 +20,10 @@ public interface IRepostJournal
     /// <summary>An extractor that claimed the URL failed hard; <paramref name="extractionError"/> carries the why.</summary>
     Task RecordFailureAsync(Uri url, string extractor, ExtractionError extractionError, TimeSpan elapsed, long chatId, CancellationToken cancellationToken);
 
-    /// <summary>An extractor claimed the URL but produced an empty payload.</summary>
+    /// <summary>
+    /// An extractor claimed the URL but produced nothing to send — an empty payload, or a video post's text
+    /// without its video that the chat's settings leave unsaid.
+    /// </summary>
     Task RecordNothingExtractedAsync(Uri url, string extractor, TimeSpan elapsed, long chatId, CancellationToken cancellationToken);
 
     /// <summary>Extractors ran but none claimed the URL as theirs.</summary>
