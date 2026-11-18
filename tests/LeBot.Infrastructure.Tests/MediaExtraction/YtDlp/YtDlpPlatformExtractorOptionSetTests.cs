@@ -13,7 +13,7 @@ public class YtDlpPlatformExtractorOptionSetTests
         {
             DownloadDirectory = Path.GetTempPath(),
         });
-        return new YtDlpPlatformExtractor(options, NullLogger<YtDlpPlatformExtractor>.Instance);
+        return new YtDlpPlatformExtractor(options, TimeProvider.System, NullLogger<YtDlpPlatformExtractor>.Instance);
     }
 
     [Fact]

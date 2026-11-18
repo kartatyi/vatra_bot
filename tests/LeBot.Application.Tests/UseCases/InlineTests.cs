@@ -106,6 +106,20 @@ public class InlineTests
     }
 
     [Fact]
+    public async Task Prepare_LiveStreamClip_PreparesItsTextOnly_NeverCachesOrUploads()
+    {
+        var note = new MediaItem("/tmp/live.note.mp4", MediaKind.VideoNote, "video/mp4", 100, 30);
+        var payload = new MediaPayload(Url, "GTA 6 launch stream", null, [note]) { IsLive = true };
+        _extractor.ExtractAsync(Url, Arg.Any<CancellationToken>()).Returns(Result<MediaPayload, ExtractionError>.Success(payload));
+
+        var post = await CreatePreparer().PrepareAsync(Url);
+
+        post.Should().Be(new PreparedPost(Kind: null, FileId: null, "GTA 6 launch stream"));
+        await _uploader.DidNotReceiveWithAnyArgs().UploadAsync(default!, default);
+        await _cache.DidNotReceiveWithAnyArgs().SaveAsync(default!, default!, default);
+    }
+
+    [Fact]
     public async Task Prepare_TextOnlyPost_PreparesTextWithoutUploading()
     {
         var payload = new MediaPayload(Url, null, null, [], "just words");

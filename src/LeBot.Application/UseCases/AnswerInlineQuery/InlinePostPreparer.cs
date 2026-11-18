@@ -103,6 +103,12 @@ public sealed class InlinePostPreparer(
             var result = await extractor.ExtractAsync(url, cancellationToken);
             switch (result)
             {
+                case Result<MediaPayload, ExtractionError>.Ok ok when ok.Value.IsLive:
+                    // A live stream comes back as a round video, which an inline answer can't carry, and a
+                    // prepared post lives for weeks while the stream moves on in minutes — offer its text.
+                    // The recorded clip is left to the hourly downloads sweep.
+                    textOnly ??= ok.Value.Body is null ? null : ok.Value with { Items = [] };
+                    break;
                 case Result<MediaPayload, ExtractionError>.Ok ok when ok.Value.HasMedia:
                     // Cache before the upload deletes the downloaded files — same order as a group repost.
                     return await cache.SaveAsync(ok.Value, extractor.GetType().Name, cancellationToken);

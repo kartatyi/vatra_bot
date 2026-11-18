@@ -57,4 +57,11 @@ public sealed record MediaPayload(
     /// shows it.
     /// </summary>
     public string? RevealableText { get; init; }
+
+    /// <summary>
+    /// True when <see cref="Items"/> were cut from a broadcast that was live at the time. What a live stream
+    /// shows changes by the minute, so such a payload is never cached: the next time the link is posted,
+    /// the bot records a fresh clip instead of replaying an old one.
+    /// </summary>
+    public bool IsLive { get; init; }
 }

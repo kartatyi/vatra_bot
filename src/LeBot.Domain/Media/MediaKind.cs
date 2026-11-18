@@ -10,4 +10,10 @@ public enum MediaKind
     Photo,
     Animation,
     Audio,
+
+    /// <summary>
+    /// A round video message: a square clip of at most a minute that Telegram shows as a circle. It can't
+    /// carry a caption and can't join an album.
+    /// </summary>
+    VideoNote,
 }

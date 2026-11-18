@@ -622,6 +622,25 @@ public class HandleIncomingMessageHandlerTests
     }
 
     [Fact]
+    public async Task HandleAsync_LiveStreamClip_IsSentAsIs_NeverCached()
+    {
+        var url = new Uri("https://www.youtube.com/watch?v=live");
+        var note = new MediaItem("/tmp/live.note.mp4", MediaKind.VideoNote, "video/mp4", 100, 30);
+        var payload = new MediaPayload(url, "GTA 6 launch stream", "streamer", [note], "Subscribe!") { IsLive = true };
+        _settings.GetAsync(123L, Arg.Any<CancellationToken>()).Returns(ChatSettings.Default);
+
+        _urlExtractor.Extract(Arg.Any<string>()).Returns([url]);
+        _extractor.CanHandle(url).Returns(true);
+        _extractor.ExtractAsync(url, Arg.Any<CancellationToken>())
+            .Returns(Result<MediaPayload, ExtractionError>.Success(payload));
+
+        await CreateSut().HandleAsync(Message(), CancellationToken.None);
+
+        await _messenger.Received(1).ReplyWithMediaAsync(123L, 7, payload, Arg.Any<CancellationToken>());
+        await _cache.DidNotReceiveWithAnyArgs().SaveAsync(default!, default!, default);
+    }
+
+    [Fact]
     public async Task HandleAsync_ExtractorSucceeds_CachesPayloadBeforeSending()
     {
         var url = new Uri("https://example.com/x");
