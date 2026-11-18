@@ -9,6 +9,20 @@
     queries the journal when the database actually changed, so an idle bot costs nothing —
     no agent is started until a real failure lands.
 
+    The same tick also checks that the bot process exists at all, and alerts once if it
+    has been gone longer than the grace period. It never restarts a missing bot — that is
+    the scheduled task's job (tools/install-autostart.ps1).
+
+    A bot that exists but has stopped working is a different case, and one the task cannot
+    see. The bot rewrites data\heartbeat.json every minute with when its poll loop last
+    turned. When that stops moving, the watchdog restarts the bot through its task and says
+    so in the report chat. A bot that stays stuck right after a restart is left to the
+    operator, not restarted again and again.
+
+    Every few minutes it also probes the dashboard's API, and restarts the dashboard through
+    its scheduled task when a live reader keeps answering with 5xx or not at all — a wedge the
+    task cannot see, because the process never dies.
+
     Everything identifying the deployment (report chat id, bot token) is read at runtime
     from files under -DeployRoot. Nothing in this repository may carry it.
 
@@ -39,7 +53,45 @@ param(
     [switch] $ObserveOnly,
 
     # Hard ceiling on one agent run before it is killed.
-    [int] $AgentTimeoutMinutes = 30
+    [int] $AgentTimeoutMinutes = 30,
+
+    # Process the bot runs as, watched for liveness alongside the journal.
+    [string] $BotProcessName = 'LeBot.Host',
+
+    # How long the bot may be missing before it counts as down rather than restarting.
+    # Task Scheduler retries every minute, so this is a few of its ticks.
+    [int] $LivenessGraceMinutes = 3,
+
+    # A dashboard endpoint that has to read the journal to answer, probed for the wedge a
+    # live reader can fall into. Empty skips the probe (a deployment without a dashboard).
+    [string] $DashboardProbeUrl = 'http://127.0.0.1:5005/api/data',
+
+    # The scheduled task that owns the dashboard, and the process it runs as.
+    [string] $DashboardTaskName = 'LeBot Dashboard',
+    [string] $DashboardProcessName = 'LeBot.Dashboard',
+
+    # Minutes between probes, and how many failed probes in a row mean wedged rather than slow.
+    [int] $DashboardProbeMinutes = 2,
+    [int] $DashboardFailuresBeforeRestart = 2,
+
+    # A dashboard that wedges again this soon after a restart is not cured by restarting: the
+    # operator hears about it instead of getting a restart loop.
+    [int] $DashboardRestartCooldownMinutes = 60,
+
+    # The scheduled task that owns the bot. A stuck bot is restarted through it, never around it.
+    [string] $BotTaskName = 'LeBot',
+
+    # How long the bot's poll loop may go without turning — per data\heartbeat.json, which the
+    # bot rewrites every minute — before a running bot counts as stuck and is restarted.
+    [int] $HeartbeatStaleMinutes = 5,
+
+    # How long Telegram may go without answering a loop that still turns before the operator
+    # hears about it. A restart would not help with that, so this one only alerts.
+    [int] $TelegramUnreachableMinutes = 10,
+
+    # A bot stuck again this soon after a restart is not cured by restarting: the operator
+    # hears about it instead of getting a restart loop.
+    [int] $BotRestartCooldownMinutes = 30
 )
 
 $ErrorActionPreference = 'Stop'
@@ -53,6 +105,7 @@ $StatePath   = Join-Path $StateDir 'state.json'
 $PausePath   = Join-Path $StateDir 'PAUSE'
 $LogPath     = Join-Path $StateDir 'watchdog.log'
 $DbPath      = Join-Path $DeployRoot 'data\lebot.db'
+$HeartbeatPath = Join-Path $DeployRoot 'data\heartbeat.json'
 $LocalConfig = Join-Path $DeployRoot 'appsettings.Local.json'
 $PromptPath  = Join-Path $PSScriptRoot 'watchdog-prompt.md'
 
@@ -111,6 +164,269 @@ function Send-OperatorAlert {
     }
 }
 
+# Liveness is a different question from the journal, and the journal cannot answer it: a
+# dead bot writes no failures, so to the loop below a dead bot looks exactly like a quiet
+# night. That is how 2026-08-13 went unnoticed for fourteen hours.
+#
+# This only reports. Restarting belongs to the scheduled task (tools/install-autostart.ps1)
+# — two supervisors racing to start one bot means two long-pollers on one token, which
+# Telegram answers with a 409 and neither instance survives cleanly.
+function Watch-BotLiveness {
+    if (@(Get-Process -Name $BotProcessName -ErrorAction SilentlyContinue).Count -gt 0) {
+        if ($script:BotDownSince) {
+            $downMinutes = [int] ([datetime]::UtcNow - $script:BotDownSince).TotalMinutes
+            Write-Log "bot process is back after ${downMinutes}m"
+            if ($script:BotDownAlerted) {
+                Send-OperatorAlert "Watchdog: бот знову працює, простій ~${downMinutes} хв."
+            }
+        }
+        $script:BotDownSince   = $null
+        $script:BotDownAlerted = $false
+        return
+    }
+
+    if (-not $script:BotDownSince) {
+        $script:BotDownSince = [datetime]::UtcNow
+        Write-Log "bot process '$BotProcessName' is gone — giving the scheduled task ${LivenessGraceMinutes}m" 'WRN'
+        return
+    }
+
+    if (-not $script:BotDownAlerted -and
+        ([datetime]::UtcNow - $script:BotDownSince).TotalMinutes -ge $LivenessGraceMinutes) {
+        $script:BotDownAlerted = $true
+        Write-Log "bot process '$BotProcessName' still down after ${LivenessGraceMinutes}m" 'ERR'
+        Send-OperatorAlert "Watchdog: бот лежить уже ${LivenessGraceMinutes}+ хв і не піднявся сам. Перевір задачу планувальника «LeBot»."
+    }
+}
+
+# A dashboard can be alive and still useless. Twice a reader that had been up for days began
+# answering every /api/* call with a 500 while its page kept loading, and a fresh process on
+# the same database served fine. The task cannot see that — it only restarts a process that
+# died — so this probe does, and restarts the reader through its task, never around it.
+#
+# Unlike the bot, the dashboard is safe to restart from here: it holds no Telegram token, so a
+# second copy is a port clash for a few seconds, not a 409.
+function Watch-DashboardHealth {
+    if (-not $DashboardProbeUrl) { return }
+    if ([datetime]::UtcNow -lt $script:DashboardNextProbe) { return }
+    $script:DashboardNextProbe = [datetime]::UtcNow.AddMinutes($DashboardProbeMinutes)
+
+    # A reader that is not running at all is the task's to bring back.
+    if (@(Get-Process -Name $DashboardProcessName -ErrorAction SilentlyContinue).Count -eq 0) {
+        $script:DashboardFailures = 0
+        return
+    }
+
+    $problem = $null
+    try {
+        $null = Invoke-WebRequest -Uri $DashboardProbeUrl -TimeoutSec 30 -UseBasicParsing
+    }
+    catch {
+        # Get-Prop, not .Response: a timeout carries no response, and strict mode would throw.
+        $response = Get-Prop $_.Exception 'Response'
+        $status = if ($response) { [int] $response.StatusCode } else { 0 }
+        # A 4xx means the probe asks the wrong question, which a restart would not change.
+        if ($status -eq 0 -or $status -ge 500) {
+            $problem = if ($status) { "HTTP $status" } else { $_.Exception.Message }
+        }
+    }
+
+    if (-not $problem) {
+        if ($script:DashboardFailures -gt 0 -or $script:DashboardHealAlerted) {
+            Write-Log 'dashboard answers again'
+        }
+        $script:DashboardFailures = 0
+        $script:DashboardHealAlerted = $false
+        return
+    }
+
+    $script:DashboardFailures++
+    Write-Log "dashboard probe failed ($($script:DashboardFailures)/$DashboardFailuresBeforeRestart): $problem" 'WRN'
+    if ($script:DashboardFailures -lt $DashboardFailuresBeforeRestart) { return }
+
+    if ($script:DashboardRestartedAt -and
+        ([datetime]::UtcNow - $script:DashboardRestartedAt).TotalMinutes -lt $DashboardRestartCooldownMinutes) {
+        if (-not $script:DashboardHealAlerted) {
+            $script:DashboardHealAlerted = $true
+            Write-Log 'dashboard failing again right after a restart — leaving it to the operator' 'ERR'
+            Send-OperatorAlert "Watchdog: дашборд знову відповідає помилкою ($problem) одразу після перезапуску. Стек — у logs\dashboard-*.log."
+        }
+        return
+    }
+
+    Restart-Dashboard -Reason $problem
+}
+
+# Stop and start through the task, without the disable/enable that an exe swap needs: that
+# dance stops the task restoring the old binary mid-copy, a restart has nothing to race, and a
+# task left disabled by a failed step would be worse than the wedge it was meant to clear.
+function Restart-Dashboard {
+    param([string] $Reason)
+
+    Write-Log "dashboard wedged ($Reason) — restarting it through task '$DashboardTaskName'" 'WRN'
+    $script:DashboardRestartedAt = [datetime]::UtcNow
+    $script:DashboardFailures = 0
+
+    try {
+        Stop-ScheduledTask -TaskName $DashboardTaskName
+        Get-Process -Name $DashboardProcessName -ErrorAction SilentlyContinue | Stop-Process -Force
+        for ($i = 0; $i -lt 15 -and @(Get-Process -Name $DashboardProcessName -ErrorAction SilentlyContinue).Count -gt 0; $i++) {
+            Start-Sleep -Seconds 1
+        }
+        Start-ScheduledTask -TaskName $DashboardTaskName
+        Write-Log 'dashboard restarted'
+    }
+    catch {
+        # The task's own repeating tick brings a stopped reader back within its interval anyway.
+        Write-Log "dashboard restart failed: $($_.Exception.Message)" 'ERR'
+    }
+}
+
+function Read-Heartbeat {
+    # System.Text.Json rather than ConvertFrom-Json: it hands the timestamps back exactly as
+    # written, offset and all, instead of turning them into local DateTime values.
+    if (-not (Test-Path $HeartbeatPath)) { return $null }
+    try {
+        $doc = [System.Text.Json.JsonDocument]::Parse((Get-Content $HeartbeatPath -Raw))
+        try {
+            $root = $doc.RootElement
+            return [pscustomobject]@{
+                Pid        = $root.GetProperty('pid').GetInt32()
+                WrittenAt  = Read-Instant $root 'writtenAt'
+                LoopAt     = Read-Instant $root 'loopAt'
+                PolledOkAt = Read-Instant $root 'polledOkAt'
+            }
+        }
+        finally {
+            $doc.Dispose()
+        }
+    }
+    catch {
+        # Caught mid-rename, or not a heartbeat at all: judge it on a later tick.
+        return $null
+    }
+}
+function Read-Instant {
+    param([System.Text.Json.JsonElement] $Root, [string] $Name)
+
+    $value = $Root.GetProperty($Name)
+    if ($value.ValueKind -eq [System.Text.Json.JsonValueKind]::Null) { return $null }
+    return $value.GetDateTimeOffset().UtcDateTime
+}
+function Watch-BotHeartbeat {
+    $now = [datetime]::UtcNow
+
+    # A gap between our own ticks means the machine slept (or the watchdog stalled): every
+    # heartbeat looks old on waking, so give the bot a couple of minutes to beat again.
+    if ($script:HeartbeatLastCheck -and ($now - $script:HeartbeatLastCheck).TotalMinutes -ge 2) {
+        $script:HeartbeatGraceUntil = $now.AddMinutes(2)
+    }
+    $script:HeartbeatLastCheck = $now
+    if ($script:HeartbeatGraceUntil -and $now -lt $script:HeartbeatGraceUntil) { return }
+
+    # None is Watch-BotLiveness's case; two means a swap or an update in flight — not one bot to judge.
+    $bots = @(Get-Process -Name $BotProcessName -ErrorAction SilentlyContinue)
+    if ($bots.Count -ne 1) { return }
+    $bot = $bots[0]
+
+    # Still starting: its first beat, and its first poll, may simply not have happened yet.
+    $upMinutes = ($now - $bot.StartTime.ToUniversalTime()).TotalMinutes
+    if ($upMinutes -lt $HeartbeatStaleMinutes) { return }
+
+    $beat = Read-Heartbeat
+    if (-not $beat -or $beat.Pid -ne $bot.Id) {
+        # A build from before the heartbeat, or the previous process's file this one never replaced.
+        if (-not $script:HeartbeatMissingLogged) {
+            $script:HeartbeatMissingLogged = $true
+            Write-Log "bot pid $($bot.Id) writes no heartbeat to $HeartbeatPath — an older build? not judging it" 'WRN'
+        }
+        return
+    }
+    $script:HeartbeatMissingLogged = $false
+
+    $beatMinutes = if ($beat.WrittenAt) { ($now - $beat.WrittenAt).TotalMinutes } else { $upMinutes }
+    $loopMinutes = if ($beat.LoopAt) { ($now - $beat.LoopAt).TotalMinutes } else { $upMinutes }
+
+    $stuck = $null
+    if ($beatMinutes -ge $HeartbeatStaleMinutes) {
+        $stuck = "не оновлював пульс $([int] $beatMinutes) хв"
+    }
+    elseif ($loopMinutes -ge $HeartbeatStaleMinutes) {
+        $stuck = "не опитував Telegram $([int] $loopMinutes) хв"
+    }
+
+    if ($stuck) {
+        Restart-StuckBot -Reason $stuck
+        return
+    }
+
+    if ($script:BotStuckAlerted) {
+        Write-Log 'bot polls again'
+    }
+    $script:BotStuckAlerted = $false
+
+    $okMinutes = if ($beat.PolledOkAt) { ($now - $beat.PolledOkAt).TotalMinutes } else { $upMinutes }
+    if ($okMinutes -ge $TelegramUnreachableMinutes) {
+        if (-not $script:TelegramDownAlerted) {
+            $script:TelegramDownAlerted = $true
+            Write-Log "bot polls but Telegram has not answered for $([int] $okMinutes)m" 'WRN'
+            Send-OperatorAlert "Watchdog: бот працює, але вже $([int] $okMinutes) хв не може достукатися до Telegram. Перезапуск тут не допоможе — перевір інтернет."
+        }
+    }
+    elseif ($script:TelegramDownAlerted) {
+        $script:TelegramDownAlerted = $false
+        Write-Log 'telegram answers the bot again'
+        Send-OperatorAlert 'Watchdog: Telegram знову відповідає боту.'
+    }
+}
+function Restart-StuckBot {
+    param([string] $Reason)
+
+    if ($script:BotRestartedAt -and
+        ([datetime]::UtcNow - $script:BotRestartedAt).TotalMinutes -lt $BotRestartCooldownMinutes) {
+        if (-not $script:BotStuckAlerted) {
+            $script:BotStuckAlerted = $true
+            Write-Log "bot stuck again ($Reason) right after a restart — leaving it to the operator" 'ERR'
+            Send-OperatorAlert "Watchdog: бот знову $Reason одразу після перезапуску — лишаю тобі. Деталі в logs\lebot-*.log."
+        }
+        return
+    }
+
+    # Disabled is how a deploy holds the exe (disable, stop, copy, enable, start); a restart now would race it.
+    $task = Get-ScheduledTask -TaskName $BotTaskName -ErrorAction SilentlyContinue
+    if ($task -and $task.State -eq 'Disabled') {
+        Write-Log "bot looks stuck ($Reason), but task '$BotTaskName' is disabled — a deploy in progress? leaving it" 'WRN'
+        return
+    }
+
+    Write-Log "bot stuck ($Reason) — restarting it through task '$BotTaskName'" 'WRN'
+    $script:BotRestartedAt = [datetime]::UtcNow
+
+    try {
+        # What the bot started — yt-dlp, ffmpeg, a headless browser — outlives it unless killed by
+        # tree, so note the children before the task takes their parent away.
+        $botIds = @(Get-Process -Name $BotProcessName -ErrorAction SilentlyContinue | ForEach-Object Id)
+        $children = @(Get-CimInstance Win32_Process | Where-Object { $botIds -contains $_.ParentProcessId })
+
+        Stop-ScheduledTask -TaskName $BotTaskName
+        foreach ($child in $children) {
+            $null = & taskkill.exe /PID $child.ProcessId /T /F 2>&1
+        }
+        Get-Process -Name $BotProcessName -ErrorAction SilentlyContinue | Stop-Process -Force
+        for ($i = 0; $i -lt 15 -and @(Get-Process -Name $BotProcessName -ErrorAction SilentlyContinue).Count -gt 0; $i++) {
+            Start-Sleep -Seconds 1
+        }
+        Start-ScheduledTask -TaskName $BotTaskName
+
+        Write-Log "bot restarted ($($children.Count) child process(es) killed)"
+        Send-OperatorAlert "Watchdog: бот $Reason, хоча процес живий — перезапустив."
+    }
+    catch {
+        # The task's own repeating tick brings a stopped bot back within its interval anyway.
+        Write-Log "bot restart failed: $($_.Exception.Message)" 'ERR'
+        Send-OperatorAlert "Watchdog: бот $Reason, а перезапустити не вийшло: $($_.Exception.Message)"
+    }
+}
 function Read-JsonFile {
     param([string] $Path, [object] $Default)
 
@@ -184,7 +500,10 @@ ORDER BY Id;
     if ($LASTEXITCODE -ne 0) { throw "sqlite3 failed: $raw" }
     if ([string]::IsNullOrWhiteSpace($raw)) { return @() }
 
-    return @($raw | ConvertFrom-Json)
+    # sqlite3 -json prints one row per line, and a native command's output reaches PowerShell
+    # as one string per line. Piped as they are, ConvertFrom-Json parses `[{row},` on its own
+    # and throws — on every tick, since the checkpoint can then never move past the batch.
+    return @(($raw -join "`n") | ConvertFrom-Json)
 }
 
 function Get-MaxFailureId {
@@ -276,9 +595,30 @@ Write-Log "watchdog up — poll ${PollSeconds}s, checkpoint $($state.checkpointI
 
 $lastStamp = ''
 $authAlerted = $false
+$script:BotDownSince = $null
+$script:BotDownAlerted = $false
+$script:DashboardNextProbe = [datetime]::MinValue
+$script:DashboardFailures = 0
+$script:DashboardRestartedAt = $null
+$script:DashboardHealAlerted = $false
+$script:HeartbeatLastCheck = $null
+$script:HeartbeatGraceUntil = $null
+$script:HeartbeatMissingLogged = $false
+$script:BotRestartedAt = $null
+$script:BotStuckAlerted = $false
+$script:TelegramDownAlerted = $false
 
 while ($true) {
     try {
+        # Ahead of the PAUSE check deliberately: PAUSE silences agent runs, but "the bot is
+        # not running" is the one thing you always want to hear — the more so because the
+        # 401 auto-pause path below writes PAUSE itself. The heartbeat and dashboard checks
+        # sit here for the same reason: they involve no agent, and an auto-pause must not
+        # switch them off.
+        Watch-BotLiveness
+        Watch-BotHeartbeat
+        Watch-DashboardHealth
+
         if (Test-Path $PausePath) {
             if (-not $Once) { Start-Sleep -Seconds $PollSeconds; continue }
             Write-Log 'PAUSE file present — nothing to do'
