@@ -78,6 +78,7 @@ var id = Guid.NewGuid();    // bad  — non-deterministic; banned in Domain
 - Every `!` (null-forgiving) carries an inline comment proving null is impossible. No proof → drop the `!`.
 - `record` for immutable DTOs / payloads / value objects; `class` for entities with behaviour.
 - `async`/`await` on every I/O path; method ends in `Async`; always thread `CancellationToken` through.
+- Handlers for different chats run at the same time; one chat's updates run in order ([ADR 0016](docs/decisions/0016-per-chat-update-dispatch.md)). Every singleton a handler reaches must be safe under concurrent calls — a `DbContext` per call, `Concurrent*` / `Interlocked`, or a lock — never a bare `Dictionary` or a shared context.
 
 Forbidden in production — each with what to do instead:
 
@@ -99,7 +100,7 @@ throw new NotSupportedException(url.Host);             // bad  — control flow 
 ```
 
 - Infrastructure surfaces expected failures as `Result`; it does not invent exception types. Transient Telegram `429`/`5xx` retry in [`TelegramBotMessenger`](src/LeBot.Infrastructure/Telegram/TelegramBotMessenger.cs) via Polly (exponential backoff + jitter, 3 attempts); permanent `4xx` falls through to a source-URL text reply.
-- **Never crash on one bad update.** [`TelegramUpdateDispatcher`](src/LeBot.Infrastructure/Telegram/TelegramUpdateDispatcher.cs) wraps each update in try/catch, logs under its `CorrelationId`, and keeps polling; the poll loop itself catches and backs off 5 s. A broad `catch (Exception)` is allowed *only* here, at the boundary, and only because it logs and continues — never to swallow.
+- **Never crash on one bad update.** [`TelegramUpdateDispatcher`](src/LeBot.Infrastructure/Telegram/TelegramUpdateDispatcher.cs) wraps each update in try/catch, logs under its `CorrelationId`, and keeps polling; [`ChatUpdateScheduler`](src/LeBot.Infrastructure/Telegram/ChatUpdateScheduler.cs) catches whatever still escapes, so one bad update never breaks its chat's queue; the poll loop itself catches and backs off 5 s. A broad `catch (Exception)` is allowed *only* here, at the boundary, and only because it logs and continues — never to swallow.
 
 ## Logging — Serilog, structured only
 

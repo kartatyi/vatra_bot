@@ -22,6 +22,18 @@ namespace LeBot.Infrastructure.Telegram;
 /// handler inside a logging scope, and survives transient errors with a small backoff
 /// instead of crashing the whole bot.
 /// </summary>
+/// <remarks>
+/// <para>The poll loop never waits on a handler (ADR&#160;0016). Each update is queued on a
+/// <see cref="ChatUpdateScheduler"/> under its chat (<see cref="OrderingKeyOf"/>): a chat's own updates run
+/// one after another, in order, while different chats run side by side, at most
+/// <see cref="TelegramOptions.MaxConcurrentUpdates"/> at once. One slow link delays only its own chat.</para>
+/// <para>The offset — which acknowledges updates to Telegram — moves past an update as soon as it is queued,
+/// not once it is handled. getUpdates only ever returns the oldest unacknowledged updates, so holding the
+/// offset at a stuck update would, a hundred updates later, starve the loop of new ones — the very freeze
+/// this design removes — and a restart would replay every chat's already-handled updates behind it as
+/// duplicate reposts. The price: an update still being handled when the process dies is not delivered
+/// again; whoever posted it posts it again.</para>
+/// </remarks>
 public sealed class TelegramUpdateDispatcher(
     ITelegramBotClient bot,
     HandleIncomingMessageHandler handler,
@@ -42,6 +54,18 @@ public sealed class TelegramUpdateDispatcher(
     : BackgroundService
 {
     private static readonly TimeSpan BackoffOnError = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// How long shutdown waits for handlers still running once they've been told to stop. Short of the
+    /// host's own 30 s shutdown timeout, so a handler that ignores cancellation is reported, not just cut off.
+    /// </summary>
+    private static readonly TimeSpan DrainTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// The lane for an update that belongs to no chat and no person — none of the kinds the bot subscribes to.
+    /// Telegram never uses 0 as an id.
+    /// </summary>
+    private const long NoChatLane = 0;
 
     // Defaults and caps for the on-demand dashboard reads, kept small so a reply stays well under
     // Telegram's 4096-char ceiling and a typo can't ask for thousands of rows.
@@ -70,6 +94,13 @@ public sealed class TelegramUpdateDispatcher(
         var me = await bot.GetMe(stoppingToken);
         logger.LogInformation("Bot @{Username} (id {Id}) is online", me.Username, me.Id);
 
+        var scheduler = new ChatUpdateScheduler(Math.Max(1, _options.MaxConcurrentUpdates), logger);
+        await PollAsync(scheduler, stoppingToken);
+        await DrainAsync(scheduler);
+    }
+
+    private async Task PollAsync(ChatUpdateScheduler scheduler, CancellationToken stoppingToken)
+    {
         var offset = 0;
         var announcedServing = false;
 
@@ -94,8 +125,9 @@ public sealed class TelegramUpdateDispatcher(
 
                 foreach (var update in updates)
                 {
-                    await DispatchAsync(update, stoppingToken);
+                    // Acknowledged once queued, not once handled — see the remarks on the class.
                     offset = update.Id + 1;
+                    Route(update, scheduler, stoppingToken);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -117,28 +149,67 @@ public sealed class TelegramUpdateDispatcher(
         }
     }
 
-    private async Task DispatchAsync(Update update, CancellationToken cancellationToken)
+    /// <summary>
+    /// Waits for the handlers still running at shutdown. They hold the same, now cancelled, token, so a
+    /// well-behaved one returns at once; one still going after <see cref="DrainTimeout"/> is left behind with
+    /// a warning rather than holding the host's shutdown hostage.
+    /// </summary>
+    private async Task DrainAsync(ChatUpdateScheduler scheduler)
     {
-        using var scope = logger.BeginScope(new Dictionary<string, object>
+        try
         {
-            ["CorrelationId"] = update.Id,
-        });
+            await scheduler.WhenIdleAsync().WaitAsync(DrainTimeout, timeProvider);
+        }
+        catch (TimeoutException)
+        {
+            logger.LogWarning("Stopping with updates still being handled after {Seconds}s; abandoning them", DrainTimeout.TotalSeconds);
+        }
+    }
 
+    /// <summary>Sends an update on its way without waiting for it.</summary>
+    private void Route(Update update, ChatUpdateScheduler scheduler, CancellationToken cancellationToken)
+    {
         if (update.InlineQuery is { } inlineQuery)
         {
-            // Not awaited: an inline answer may wait seconds for a download, and the poll loop handles
-            // one update at a time — awaiting here would stall every group's reposts behind it.
+            // Detached rather than queued: an inline query belongs to no chat, and it may wait seconds for a
+            // download that the next keystroke's query must not queue behind.
             _ = AnswerInlineAsync(update.Id, inlineQuery, cancellationToken);
             return;
         }
 
-        // A "loading" placeholder was sent: finishing it can take minutes, so it too runs off the loop.
+        // A "loading" placeholder was sent: finishing it can take minutes, so it too runs detached.
         if (update.ChosenInlineResult is { InlineMessageId: { } inlineMessageId } chosen &&
             InlineResults.TryParsePending(chosen.ResultId, out var withText))
         {
             _ = CompletePlaceholderAsync(update.Id, new ChosenPlaceholder(inlineMessageId, chosen.Query, withText, chosen.From.LanguageCode), cancellationToken);
             return;
         }
+
+        scheduler.Enqueue(OrderingKeyOf(update), token => DispatchAsync(update, token), cancellationToken);
+    }
+
+    /// <summary>
+    /// The lane an update queues in: its chat, so that a chat's messages, button presses and membership
+    /// changes keep their order — a chained post's "2/3" never overtakes its "1/3". What has no chat — a
+    /// button under a message sent inline, a chosen inline result — queues with the person who sent it.
+    /// </summary>
+    internal static long OrderingKeyOf(Update update) => update switch
+    {
+        { Message: { } message } => message.Chat.Id,
+        { CallbackQuery: { Message: { } origin } } => origin.Chat.Id,
+        { CallbackQuery: { } callback } => callback.From.Id,
+        { MyChatMember: { } member } => member.Chat.Id,
+        { ChatMember: { } member } => member.Chat.Id,
+        { ChosenInlineResult: { } chosen } => chosen.From.Id,
+        _ => NoChatLane,
+    };
+
+    private async Task DispatchAsync(Update update, CancellationToken cancellationToken)
+    {
+        using var scope = logger.BeginScope(new Dictionary<string, object>
+        {
+            ["CorrelationId"] = update.Id,
+        });
 
         try
         {
@@ -171,8 +242,13 @@ public sealed class TelegramUpdateDispatcher(
                     SenderId: message.From is { IsBot: false } sender ? sender.Id : null),
                 cancellationToken);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            // Shutting down; the update dies with the bot.
+        }
+        catch (Exception ex)
+        {
+            // Any other cancellation is a timeout somewhere inside — a failure of this update like any other.
             logger.LogError(ex, "Unhandled error processing update {UpdateId}", update.Id);
         }
     }

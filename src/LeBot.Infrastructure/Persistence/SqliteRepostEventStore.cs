@@ -8,8 +8,9 @@ namespace LeBot.Infrastructure.Persistence;
 /// <summary>
 /// SQLite-backed <see cref="IRepostEventStore"/>. A singleton, so it creates a short-lived context per
 /// operation through <see cref="IDbContextFactory{TContext}"/> rather than capturing a scoped context —
-/// the pattern for long-lived consumers. The dispatcher handles updates one at a time, so writes don't
-/// contend with each other; WAL (enabled at startup) keeps them from colliding with a dashboard reader.
+/// the pattern for long-lived consumers, and what keeps chats handled side by side (ADR&#160;0016) from ever
+/// sharing a context. Their writes queue on SQLite's write lock for up to the connection's busy timeout; WAL
+/// (enabled at startup) keeps them from colliding with a dashboard reader.
 /// Reads run <see cref="EntityFrameworkQueryableExtensions.AsNoTracking{TEntity}"/> — they only project,
 /// never mutate.
 /// </summary>

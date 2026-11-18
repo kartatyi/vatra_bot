@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using LeBot.Application.Caching;
@@ -33,6 +34,13 @@ public sealed class FileSystemMediaCache : IMediaCache
     private readonly MediaCacheOptions _options;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<FileSystemMediaCache> _logger;
+
+    /// <summary>
+    /// Entries a <see cref="SaveAsync"/> is writing right now, by directory name. Chats are handled side by
+    /// side, so saves overlap: mid-write an entry has no <c>entry.json</c> yet — just what a crash leftover
+    /// looks like — and the <see cref="Prune"/> that every save runs must leave it alone.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, byte> _writing = new(StringComparer.Ordinal);
 
     public FileSystemMediaCache(
         IOptions<MediaCacheOptions> options,
@@ -133,6 +141,27 @@ public sealed class FileSystemMediaCache : IMediaCache
         }
 
         var key = MediaCacheKey.For(payload.SourceUrl);
+        if (!_writing.TryAdd(key.DirectoryName, 0))
+        {
+            // Another chat posted the same link a moment ago and is storing it right now; that copy will do.
+            return payload;
+        }
+
+        try
+        {
+            await WriteAsync(payload, extractor, key, cancellationToken);
+        }
+        finally
+        {
+            _writing.TryRemove(key.DirectoryName, out _);
+        }
+
+        // The disk store keeps copies, so the caller still sends — and then deletes — its own files.
+        return payload;
+    }
+
+    private async Task WriteAsync(MediaPayload payload, string extractor, MediaCacheKey key, CancellationToken cancellationToken)
+    {
         var entryDirectory = Path.Combine(_options.ResolvedDirectory, key.DirectoryName);
 
         try
@@ -183,9 +212,6 @@ public sealed class FileSystemMediaCache : IMediaCache
             _logger.LogWarning(ex, "Could not cache the repost for {Url}", payload.SourceUrl);
             DeleteEntry(entryDirectory);
         }
-
-        // The disk store keeps copies, so the caller still sends — and then deletes — its own files.
-        return payload;
     }
 
     /// <summary>
@@ -210,6 +236,11 @@ public sealed class FileSystemMediaCache : IMediaCache
         foreach (var directory in Directory.EnumerateDirectories(root))
         {
             var document = TryReadDocument(directory);
+            if (document is null && _writing.ContainsKey(Path.GetFileName(directory)))
+            {
+                continue; // a save still writing it, not a leftover
+            }
+
             if (document is null || IsExpired(document))
             {
                 // Also catches directories left half-written by a crash: no readable entry.json,
