@@ -83,6 +83,7 @@ public sealed class TelegramUpdateDispatcher(
                     timeout: _options.PollingTimeoutSeconds,
                     allowedUpdates: [UpdateType.Message, UpdateType.CallbackQuery, UpdateType.InlineQuery, UpdateType.ChosenInlineResult],
                     cancellationToken: stoppingToken);
+                health.MarkLoopTurned(timeProvider.GetUtcNow(), polledOk: true);
 
                 if (!announcedServing)
                 {
@@ -104,6 +105,8 @@ public sealed class TelegramUpdateDispatcher(
             }
             catch (Exception ex)
             {
+                // Still turning, just not reaching Telegram: the heartbeat tells the watchdog that apart from a stuck loop.
+                health.MarkLoopTurned(timeProvider.GetUtcNow(), polledOk: false);
                 logger.LogError(ex, "Polling loop error; backing off {Backoff}s before retry", BackoffOnError.TotalSeconds);
                 try
                 {
