@@ -143,6 +143,7 @@ public static class DependencyInjection
 
         services.AddSingleton<FeedbackRelay>();
         services.AddHostedService<TelegramUpdateDispatcher>();
+        services.AddHostedService<HeartbeatWriter>();
         services.AddHostedService<WeeklyDigestService>();
         services.AddHostedService<DownloadsCleanupService>();
         services.AddHostedService<MediaCacheCleanupService>();

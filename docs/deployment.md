@@ -204,6 +204,16 @@ It prints a ✓/✗ checklist and exits non-zero if anything is broken, so a dep
 
 Schedule an external monitor (UptimeRobot, your own ping script) to DM `/ping` every N minutes — if it stops answering, you know to investigate.
 
+- **Heartbeat.** Once a minute the bot rewrites `data\heartbeat.json`, next to the journal. A process that exists is not proof the bot is polling: on 2026-11-18 one stuck update kept every chat silent for 2.5 hours while the process looked healthy. `tools/watchdog.ps1` reads this file. The times are UTC:
+
+  ```json
+  { "pid": 4242, "version": "1.2.3", "writtenAt": "…", "loopAt": "…", "polledOkAt": "…" }
+  ```
+
+  - `writtenAt` is when the file was written. If it stops moving, the whole process is frozen.
+  - `loopAt` is when the poll loop last finished a round, successful or not. If it stops moving while `writtenAt` still moves, the loop is stuck, and a restart is the fix.
+  - `polledOkAt` is when Telegram last answered. If it stops moving while `loopAt` still moves, the bot can't reach Telegram, and a restart won't help.
+
 ## 7. Graceful shutdown
 
 `Stop-ScheduledTask` (or `taskkill /im LeBot.Host.exe`) sends SIGTERM. The bot:
