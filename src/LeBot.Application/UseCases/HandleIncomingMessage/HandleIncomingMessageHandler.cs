@@ -137,8 +137,11 @@ public sealed class HandleIncomingMessageHandler(
                 case Result<MediaPayload, ExtractionError>.Ok ok when ok.Value.HasMedia:
                     // Cache first: the messenger deletes the files it was handed once the upload
                     // finishes, so after the send there is nothing left to copy. The cache keeps the
-                    // full text; each chat's caption settings shape it on the way out.
-                    var stored = await cache.SaveAsync(ok.Value, extractorName, cancellationToken);
+                    // full text; each chat's caption settings shape it on the way out. A clip of a live
+                    // stream skips the cache: by the next time the link comes round it shows something else.
+                    var stored = ok.Value.IsLive
+                        ? ok.Value
+                        : await cache.SaveAsync(ok.Value, extractorName, cancellationToken);
                     await ReplyWithMediaAsync(message, settings.ShapeCaption(stored), cancellationToken);
                     metrics.RecordMediaRepost(extractorName);
                     await journal.RecordMediaRepostAsync(

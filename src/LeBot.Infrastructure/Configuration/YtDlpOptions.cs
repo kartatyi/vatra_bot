@@ -10,7 +10,10 @@ public sealed class YtDlpOptions
     /// <summary>Path to the yt-dlp binary. Fetched by <c>tools/fetch-tools.ps1</c>.</summary>
     public string BinaryPath { get; init; } = "tools/yt-dlp/yt-dlp.exe";
 
-    /// <summary>Optional ffmpeg path; required only for formats yt-dlp must merge or transcode.</summary>
+    /// <summary>
+    /// Optional ffmpeg path; required for formats yt-dlp must merge or transcode, and for clips of live
+    /// streams — without it a live link gets its text only.
+    /// </summary>
     public string? FfmpegPath { get; init; }
 
     /// <summary>
@@ -40,4 +43,20 @@ public sealed class YtDlpOptions
     /// and avoid Telegram's 50&#160;MB upload ceiling.
     /// </summary>
     public int MaxFileSizeMb { get; init; } = 50;
+
+    /// <summary>
+    /// The longest a metadata fetch may take, retries included. Past it the link counts as failed and
+    /// yt-dlp's whole process tree is killed: links are handled one by one, so a hung fetch would stall
+    /// every chat behind it.
+    /// </summary>
+    public int MetadataTimeoutSeconds { get; init; } = 90;
+
+    /// <summary>The longest a download may take, retries included; past it, as for <see cref="MetadataTimeoutSeconds"/>.</summary>
+    public int DownloadTimeoutSeconds { get; init; } = 300;
+
+    /// <summary>
+    /// How many seconds of a live stream to record — from the moment the link is handled, not from the
+    /// stream's start — before sending them as a round video. Telegram caps those at a minute.
+    /// </summary>
+    public int LiveClipSeconds { get; init; } = 30;
 }

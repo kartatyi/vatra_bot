@@ -48,6 +48,26 @@ public sealed class TelegramBotMessengerTests : IDisposable
         keyboard.InlineKeyboard.Single().Single().CallbackData == RevealButton.CallbackData;
 
     [Fact]
+    public async Task ReplyWithMediaAsync_VideoNote_SendsARoundVideoWithItsTitleAsALinkButton()
+    {
+        var url = new Uri("https://www.youtube.com/watch?v=live");
+        var note = new MediaItem(WriteFile("live.note.mp4"), MediaKind.VideoNote, "video/mp4", 4, 30);
+        var payload = new MediaPayload(url, "GTA 6 launch stream", null, [note]) { IsLive = true };
+
+        var sentId = await CreateSut().ReplyWithMediaAsync(1L, 2, payload, CancellationToken.None);
+
+        sentId.Should().Be(99);
+        await _bot.Received(1).SendRequest(
+            Arg.Is<SendVideoNoteRequest>(r =>
+                r.Length == 480 &&
+                r.Duration == 30 &&
+                r.ReplyMarkup is InlineKeyboardMarkup &&
+                ((InlineKeyboardMarkup)r.ReplyMarkup).InlineKeyboard.Single().Single().Text == "🔴 GTA 6 launch stream" &&
+                ((InlineKeyboardMarkup)r.ReplyMarkup).InlineKeyboard.Single().Single().Url == url.AbsoluteUri),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task ReplyWithMediaAsync_ItemAlreadyInTelegram_IsSentByFileId()
     {
         var item = new MediaItem(string.Empty, MediaKind.Video, null, null, null) { TelegramFileId = "vid-1" };

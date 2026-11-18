@@ -62,9 +62,17 @@ public sealed record ChatSettings(
     /// of every caption source — title and author included — under <see cref="CaptionMode.Off"/>. When that
     /// changed the text and <see cref="OfferFullText"/> is on, the original <see cref="MediaPayload.Body"/>
     /// rides along as <see cref="MediaPayload.RevealableText"/>. The media and file ownership never change.
+    /// A <see cref="MediaKind.VideoNote"/> comes back untouched: it has no caption to shape.
     /// </summary>
     public MediaPayload ShapeCaption(MediaPayload payload)
     {
+        // A round video can't carry a caption at all, so there is nothing here to shape. Its title rides
+        // on a button under the circle instead, and that needs the title left in place.
+        if (payload.Items is [{ Kind: MediaKind.VideoNote }])
+        {
+            return payload;
+        }
+
         var shaped = ModeFor(payload) switch
         {
             CaptionMode.Full => payload,

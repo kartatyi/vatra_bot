@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using LeBot.Application.Ports;
 using LeBot.Domain.Common;
 using LeBot.Domain.Media;
@@ -7,6 +8,7 @@ using Microsoft.Extensions.Options;
 using Polly;
 using Polly.Retry;
 using YoutubeDLSharp;
+using YoutubeDLSharp.Metadata;
 using YoutubeDLSharp.Options;
 
 namespace LeBot.Infrastructure.MediaExtraction.YtDlp;
@@ -16,17 +18,36 @@ namespace LeBot.Infrastructure.MediaExtraction.YtDlp;
 /// list of hosts where the user is likely to post links; everything else falls
 /// through so a future per-platform extractor can take over.
 /// </summary>
-public sealed class YtDlpPlatformExtractor : IPlatformExtractor
+public sealed partial class YtDlpPlatformExtractor : IPlatformExtractor
 {
+    /// <summary>
+    /// The format a live clip is recorded in: 480p is all a round video needs, so the recording stays
+    /// small and quick to re-encode. Live streams list their video and audio separately.
+    /// </summary>
+    internal const string LiveClipFormat = "bv*[height<=480]+ba/b[height<=480]/b";
+
+    /// <summary>
+    /// Time a live clip may take beyond its own length: yt-dlp's start-up and the stream's first segments.
+    /// A 30 s clip measured ~25 s end to end — the stream's DVR window lets it read ahead of real time.
+    /// </summary>
+    private static readonly TimeSpan LiveClipSlack = TimeSpan.FromSeconds(90);
+
+    /// <summary>Re-encoding a clip of up to a minute at 480p measured about a second; this only bounds a stuck ffmpeg.</summary>
+    private static readonly TimeSpan VideoNoteEncodeTimeout = TimeSpan.FromSeconds(60);
+
     private readonly YoutubeDL _ytdl;
     private readonly YtDlpOptions _options;
+    private readonly TimeProvider _timeProvider;
     private readonly ILogger<YtDlpPlatformExtractor> _logger;
+    private readonly string? _ffmpegPath;
 
     public YtDlpPlatformExtractor(
         IOptions<YtDlpOptions> options,
+        TimeProvider timeProvider,
         ILogger<YtDlpPlatformExtractor> logger)
     {
         _options = options.Value;
+        _timeProvider = timeProvider;
         _logger = logger;
 
         Directory.CreateDirectory(_options.ResolvedDownloadDirectory);
@@ -39,7 +60,8 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
 
         if (!string.IsNullOrEmpty(_options.FfmpegPath))
         {
-            _ytdl.FFmpegPath = ExecutablePathResolver.Resolve(_options.FfmpegPath);
+            _ffmpegPath = ExecutablePathResolver.Resolve(_options.FfmpegPath);
+            _ytdl.FFmpegPath = _ffmpegPath;
         }
     }
 
@@ -65,10 +87,19 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
 
         try
         {
-            var metadata = await WithTransientRetryAsync(
-                url,
-                token => _ytdl.RunVideoDataFetch(sanitisedUrl, ct: token, overrideOptions: optionSet),
+            var metadata = await TimeBox.RunAsync(
+                token => WithTransientRetryAsync(
+                    url,
+                    innerToken => _ytdl.RunVideoDataFetch(sanitisedUrl, ct: innerToken, overrideOptions: optionSet),
+                    token),
+                TimeSpan.FromSeconds(_options.MetadataTimeoutSeconds),
+                _timeProvider,
                 cancellationToken);
+            if (metadata is null)
+            {
+                return TimedOut(url, "metadata fetch", _options.MetadataTimeoutSeconds);
+            }
+
             if (!metadata.Success || metadata.Data is null)
             {
                 var detail = JoinErrors(metadata.ErrorOutput);
@@ -91,6 +122,12 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
             }
 
             var info = metadata.Data;
+
+            // A live stream never ends, so "download it" would never return. Record a short clip instead.
+            if (IsLiveBroadcast(info))
+            {
+                return await RecordLiveClipAsync(url, sanitisedUrl, info, cancellationToken);
+            }
 
             // Some posts (Instagram image carousels seen anonymously, text-only Threads, etc.)
             // come back as playlists with zero entries — yt-dlp has nothing to download. Surface
@@ -160,14 +197,23 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
             // video and audio streams (Instagram and some other platforms only expose DASH;
             // without this selector yt-dlp grabs both streams and then "succeeds" with no
             // merged file present on disk).
-            var download = await WithTransientRetryAsync(
-                url,
-                token => _ytdl.RunVideoDownload(
-                    sanitisedUrl,
-                    format: "best[ext=mp4]/best",
-                    ct: token,
-                    overrideOptions: optionSet),
+            var download = await TimeBox.RunAsync(
+                token => WithTransientRetryAsync(
+                    url,
+                    innerToken => _ytdl.RunVideoDownload(
+                        sanitisedUrl,
+                        format: "best[ext=mp4]/best",
+                        ct: innerToken,
+                        overrideOptions: optionSet),
+                    token),
+                TimeSpan.FromSeconds(_options.DownloadTimeoutSeconds),
+                _timeProvider,
                 cancellationToken);
+            if (download is null)
+            {
+                return TimedOut(url, "download", _options.DownloadTimeoutSeconds);
+            }
+
             if (!download.Success || string.IsNullOrEmpty(download.Data))
             {
                 var detail = JoinErrors(download.ErrorOutput);
@@ -211,6 +257,108 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
             return Result<MediaPayload, ExtractionError>.Failure(
                 new ExtractionError.ToolFailure(ex.Message));
         }
+    }
+
+    /// <summary>
+    /// True when the post is a broadcast that is on air right now. A finished stream (<c>was_live</c>) is an
+    /// ordinary recording and an upcoming one has nothing to show yet; neither counts.
+    /// </summary>
+    internal static bool IsLiveBroadcast(VideoData info) =>
+        info.IsLive == true || info.LiveStatus == LiveStatus.IsLive;
+
+    /// <summary>
+    /// The options a live clip is recorded with: ffmpeg reads the stream and stops after
+    /// <paramref name="seconds"/> of output — from the moment it joins, not from the stream's start — which
+    /// is what turns an endless download into a bounded one.
+    /// </summary>
+    internal OptionSet BuildLiveOptionSet(int seconds)
+    {
+        var opts = BuildOptionSet();
+        opts.AddCustomOption("--downloader", "ffmpeg");
+        opts.AddCustomOption("--downloader-args", $"ffmpeg_o:-t {seconds}");
+        return opts;
+    }
+
+    /// <summary>
+    /// Records <see cref="YtDlpOptions.LiveClipSeconds"/> of a live stream and turns them into a round video.
+    /// Without ffmpeg there is no way to cut a stream, so the post's text is all that's left.
+    /// </summary>
+    private async Task<Result<MediaPayload, ExtractionError>> RecordLiveClipAsync(
+        Uri url,
+        string sanitisedUrl,
+        VideoData info,
+        CancellationToken cancellationToken)
+    {
+        if (_ffmpegPath is null)
+        {
+            _logger.LogInformation("Skipping the clip of live stream {Url}: no ffmpeg configured — surfacing text only", url);
+            return Result<MediaPayload, ExtractionError>.Success(
+                new MediaPayload(url, LiveTitle(info.Title), info.Uploader, [], info.Description) { IsLive = true });
+        }
+
+        var seconds = Math.Clamp(_options.LiveClipSeconds, 1, VideoNoteEncoder.MaxSeconds);
+        var limit = TimeSpan.FromSeconds(seconds) + LiveClipSlack;
+
+        var recording = await TimeBox.RunAsync(
+            token => _ytdl.RunVideoDownload(
+                sanitisedUrl,
+                format: LiveClipFormat,
+                ct: token,
+                overrideOptions: BuildLiveOptionSet(seconds)),
+            limit,
+            _timeProvider,
+            cancellationToken);
+        if (recording is null)
+        {
+            return TimedOut(url, "live clip recording", (int)limit.TotalSeconds);
+        }
+
+        if (!recording.Success || string.IsNullOrEmpty(recording.Data) || !File.Exists(recording.Data))
+        {
+            var detail = JoinErrors(recording.ErrorOutput);
+            _logger.LogWarning("Recording a clip of live stream {Url} failed: {Detail}", url, detail);
+            return Result<MediaPayload, ExtractionError>.Failure(new ExtractionError.ToolFailure(detail));
+        }
+
+        var rawPath = recording.Data;
+        var notePath = Path.ChangeExtension(rawPath, ".note.mp4");
+        var encoded = await VideoNoteEncoder.EncodeAsync(
+            _ffmpegPath, rawPath, notePath, seconds, VideoNoteEncodeTimeout, _timeProvider, _logger, cancellationToken);
+        BestEffortDelete(rawPath);
+        if (!encoded)
+        {
+            BestEffortDelete(notePath);
+            return Result<MediaPayload, ExtractionError>.Failure(
+                new ExtractionError.ToolFailure("could not turn the live clip into a round video"));
+        }
+
+        var item = new MediaItem(
+            FilePath: notePath,
+            Kind: MediaKind.VideoNote,
+            MimeType: "video/mp4",
+            SizeBytes: new FileInfo(notePath).Length,
+            DurationSeconds: seconds);
+
+        _logger.LogInformation("Recorded {Seconds}s of live stream {Url} as a round video", seconds, url);
+        return Result<MediaPayload, ExtractionError>.Success(
+            new MediaPayload(url, LiveTitle(info.Title), info.Uploader, [item], info.Description) { IsLive = true });
+    }
+
+    /// <summary>
+    /// <paramref name="title"/> without the "YYYY-MM-DD HH:MM" yt-dlp appends to every live stream's title —
+    /// the moment it looked, which says nothing a viewer needs and crowds the button's one line.
+    /// </summary>
+    internal static string? LiveTitle(string? title) =>
+        title is null ? null : LiveTimestampSuffix().Replace(title, string.Empty);
+
+    [GeneratedRegex(@"\s+\d{4}-\d{2}-\d{2} \d{2}:\d{2}$")]
+    private static partial Regex LiveTimestampSuffix();
+
+    private Result<MediaPayload, ExtractionError> TimedOut(Uri url, string step, int seconds)
+    {
+        _logger.LogWarning("yt-dlp {Step} for {Url} ran past {TimeoutSeconds}s; killed it", step, url, seconds);
+        return Result<MediaPayload, ExtractionError>.Failure(
+            new ExtractionError.ToolFailure($"yt-dlp {step} timed out after {seconds}s"));
     }
 
     private static string JoinErrors(IEnumerable<string> errorOutput)
@@ -296,18 +444,26 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
     private async Task<Result<MediaPayload, ExtractionError>> DownloadPlaylistAsync(
         Uri url,
         string sanitisedUrl,
-        YoutubeDLSharp.Metadata.VideoData info,
+        VideoData info,
         OptionSet optionSet,
         CancellationToken cancellationToken)
     {
-        var playlistResult = await WithTransientRetryAsync(
-            url,
-            token => _ytdl.RunVideoPlaylistDownload(
-                sanitisedUrl,
-                format: "best[ext=mp4]/best",
-                ct: token,
-                overrideOptions: optionSet),
+        var playlistResult = await TimeBox.RunAsync(
+            token => WithTransientRetryAsync(
+                url,
+                innerToken => _ytdl.RunVideoPlaylistDownload(
+                    sanitisedUrl,
+                    format: "best[ext=mp4]/best",
+                    ct: innerToken,
+                    overrideOptions: optionSet),
+                token),
+            TimeSpan.FromSeconds(_options.DownloadTimeoutSeconds),
+            _timeProvider,
             cancellationToken);
+        if (playlistResult is null)
+        {
+            return TimedOut(url, "playlist download", _options.DownloadTimeoutSeconds);
+        }
 
         if (!playlistResult.Success || playlistResult.Data is null or { Length: 0 })
         {
@@ -350,7 +506,7 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
             new MediaPayload(url, info.Title, info.Uploader, items, info.Description));
     }
 
-    private static bool AllEntriesHaveNoFormats(YoutubeDLSharp.Metadata.VideoData[] entries)
+    private static bool AllEntriesHaveNoFormats(VideoData[] entries)
     {
         foreach (var entry in entries)
         {

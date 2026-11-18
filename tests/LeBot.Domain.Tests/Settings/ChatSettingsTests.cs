@@ -150,6 +150,21 @@ public class ChatSettingsTests
         Settings.ShapeCaption(payload).Should().BeSameAs(payload);
     }
 
+    [Fact]
+    public void ShapeCaption_VideoNote_KeepsTheTitleItsButtonNeeds()
+    {
+        var payload = Payload("https://www.youtube.com/watch?v=live", MediaKind.VideoNote) with
+        {
+            Title = "GTA 6 launch stream",
+            Description = "Subscribe! https://example.com/sub",
+            IsLive = true,
+        };
+
+        var shaped = new ChatSettings(CaptionMode.Off, CaptionMode.Full).ShapeCaption(payload);
+
+        shaped.Should().BeSameAs(payload);
+    }
+
     private static MediaPayload Payload(string url, params MediaKind[] kinds) =>
         new(new Uri(url), Title: null, Author: null,
             Items: kinds.Select((kind, i) => new MediaItem($"{i}.bin", kind, null, null, null)).ToList());

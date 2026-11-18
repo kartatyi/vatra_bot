@@ -177,8 +177,11 @@ yt-dlp knobs ([`YtDlpOptions`](src/LeBot.Infrastructure/Configuration/YtDlpOptio
 "YtDlp": {
   "BinaryPath": "tools/yt-dlp/yt-dlp.exe",  // fetched by tools/fetch-tools.ps1, not committed
   "CookiesFromBrowser": null,               // "firefox" | "chrome" | … → reaches login-gated IG/X content
-  "FfmpegPath": null,                        // only for formats yt-dlp must merge/transcode
-  "MaxFileSizeMb": 50                        // skip above Telegram's upload ceiling
+  "FfmpegPath": null,                        // formats yt-dlp must merge/transcode, and live-stream clips
+  "MaxFileSizeMb": 50,                       // skip above Telegram's upload ceiling
+  "MetadataTimeoutSeconds": 90,              // past it the yt-dlp process tree is killed — one hung link
+  "DownloadTimeoutSeconds": 300,             //   must never stall every chat behind it
+  "LiveClipSeconds": 30                      // a live stream is recorded this long, sent as a round video
 }
 ```
 

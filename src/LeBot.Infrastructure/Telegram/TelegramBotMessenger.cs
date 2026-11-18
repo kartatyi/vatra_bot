@@ -156,7 +156,8 @@ public sealed class TelegramBotMessenger(
     {
         try
         {
-            var sent = await SendItemAsync(chatId, reply, item, caption, RevealButton.For(payload), cancellationToken);
+            var keyboard = item.Kind == MediaKind.VideoNote ? VideoNoteButton.For(payload) : RevealButton.For(payload);
+            var sent = await SendItemAsync(chatId, reply, item, caption, keyboard, cancellationToken);
             return sent.MessageId;
         }
         catch (ApiRequestException ex)
@@ -303,6 +304,17 @@ public sealed class TelegramBotMessenger(
                     chatId: chatId,
                     audio: inputFile,
                     caption: caption,
+                    replyParameters: reply,
+                    replyMarkup: keyboard,
+                    cancellationToken: ct), cancellationToken);
+            case MediaKind.VideoNote:
+                // A round video takes no caption — its title rides on the keyboard (VideoNoteButton).
+                // length is the circle's diameter; the encoder made the clip exactly that square.
+                return await SendWithRetryAsync(ct => bot.SendVideoNote(
+                    chatId: chatId,
+                    videoNote: inputFile,
+                    duration: item.DurationSeconds,
+                    length: MediaExtraction.YtDlp.VideoNoteEncoder.Diameter,
                     replyParameters: reply,
                     replyMarkup: keyboard,
                     cancellationToken: ct), cancellationToken);
