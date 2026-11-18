@@ -27,4 +27,18 @@ public class YtDlpPlatformExtractorOptionSetTests
 
         optionSet.FormatSort.Should().Be("vcodec:h264");
     }
+
+    [Fact]
+    public void BuildOptionSet_TwoRuns_WriteToDifferentFiles()
+    {
+        // The same link posted in two chats at once is extracted twice, side by side; a shared file name
+        // would let the first run delete the second one's download before it is sent.
+        var sut = CreateSut();
+
+        var first = sut.BuildOptionSet().Output;
+        var second = sut.BuildOptionSet().Output;
+
+        first.Should().NotBe(second);
+        first.Should().StartWith(Path.GetTempPath()).And.Contain("[%(id)s]").And.EndWith(".%(ext)s");
+    }
 }

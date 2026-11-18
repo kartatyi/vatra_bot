@@ -255,6 +255,10 @@ public sealed class YtDlpPlatformExtractor : IPlatformExtractor
         // look for a sanitised name that doesn't exist. --restrict-filenames keeps both
         // sides in lockstep with ASCII-only names.
         opts.AddCustomOption("--restrict-filenames", true);
+        // Every run writes under its own name. Chats are handled side by side (ADR 0016), so one link
+        // posted in two chats at once runs yt-dlp twice; under the plain "title [id]" name both runs would
+        // share a file, and the first to finish would delete it from under the second's upload.
+        opts.Output = Path.Combine(_options.ResolvedDownloadDirectory, $"%(title).80B [%(id)s] {Guid.NewGuid():N}.%(ext)s");
         return opts;
     }
 
