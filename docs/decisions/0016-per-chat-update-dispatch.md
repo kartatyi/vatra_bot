@@ -35,10 +35,14 @@ So delivery is at most once: an update still running when the process dies is no
 
 On shutdown the poll loop stops, every handler sees the cancelled token, queued updates that hadn't started are dropped, and the dispatcher waits up to 10 s for the running ones before logging a warning and returning — inside the host's 30 s shutdown budget.
 
+### Decision 5 — no update runs for ever, `Telegram:UpdateTimeLimitSeconds` (default 600)
+
+An update still running after ten minutes is cancelled; one that ignores the cancellation and is still going 30 s later is abandoned — left running on its own while its chat's next update goes ahead. Ten minutes sits past the slowest honest repost and past yt-dlp's own five-minute download limit, so it only fires on a hang nothing below it caught. Without it a stuck update would hold its chat, and its slot, for ever.
+
 ## Consequences
 
 - One slow link delays only its own chat; the poll loop never waits on a handler.
 - Handlers now run concurrently, so every singleton they share must be safe under concurrent calls. Today's are: stores open a `DbContext` per call, SQLite queues writers on its lock (busy timeout 30 s), metrics are `Interlocked`. The disk media cache had to learn that a save in progress isn't a crash leftover.
-- The same link posted in two chats within seconds is now extracted twice at once, as a group post and an inline query for it already could be. yt-dlp names its downloads `title [id].ext`, so the two runs share one file, and the first to finish deletes it under the second; giving each run its own file belongs to the extractor.
-- Anything stuck holds one slot until a timeout below it fires; with eight stuck chats the bot is back to a full stall, so the extractor-level timeouts still matter.
+- The same link posted in two chats within seconds is now extracted twice at once, as a group post and an inline query for it already could be. yt-dlp used to name its downloads `title [id].ext`, so the two runs shared one file and the first to finish deleted it under the second; each run now adds a GUID to the name, as the other extractors already did.
+- Anything stuck holds one slot until a timeout below it fires, at the latest the update's own ten-minute limit. An abandoned handler keeps running without a slot, so a run of hangs that ignore cancellation can briefly put more than eight updates to work.
 - Unhandled-update loss on a crash is now possible by design, and documented on the dispatcher.

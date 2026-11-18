@@ -25,4 +25,14 @@ public sealed class TelegramOptions
     /// on. A stuck chat costs one slot of the eight, not the whole bot.
     /// </remarks>
     public int MaxConcurrentUpdates { get; init; } = 8;
+
+    /// <summary>
+    /// The longest one update may be handled before it is cancelled and its chat moves on. Values below 1
+    /// count as 1.
+    /// </summary>
+    /// <remarks>
+    /// 10 minutes by default: well past the slowest honest repost — a 50&#160;MB download, then upload — and
+    /// past yt-dlp's own 5-minute download limit, so this only fires on a hang nothing below it caught.
+    /// </remarks>
+    public int UpdateTimeLimitSeconds { get; init; } = 600;
 }

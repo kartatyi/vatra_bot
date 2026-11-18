@@ -30,6 +30,11 @@ public sealed class TelegramUpdateDispatcherTests : IAsyncLifetime
     /// <summary>Only a guard against a hung run: every wait here is released by the test itself.</summary>
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
+    private static readonly TimeSpan UpdateLimit = TimeSpan.FromMinutes(10);
+
+    /// <summary>How far the fake clock moves per step while a test waits for a time limit to fire.</summary>
+    private static readonly TimeSpan TimeStep = TimeSpan.FromSeconds(15);
+
     private readonly ITelegramBotClient _bot = Substitute.For<ITelegramBotClient>();
     private readonly IRepostEventStore _events = Substitute.For<IRepostEventStore>();
     private readonly FakeTimeProvider _time = new(new DateTimeOffset(2026, 11, 18, 12, 0, 0, TimeSpan.Zero));
@@ -71,7 +76,16 @@ public sealed class TelegramUpdateDispatcherTests : IAsyncLifetime
     {
         if (_sut is not null)
         {
-            await _sut.StopAsync(CancellationToken.None);
+            // Shutdown waits for running handlers on the fake clock; keep it moving so a handler a broken
+            // build left stuck fails the test instead of hanging the run.
+            var stopping = _sut.StopAsync(CancellationToken.None);
+            for (var step = 0; step < 30 && !stopping.IsCompleted; step++)
+            {
+                _time.Advance(TimeSpan.FromSeconds(1));
+                await Task.WhenAny(stopping, Task.Delay(20));
+            }
+
+            await stopping.WaitAsync(Patience);
             _sut.Dispose();
         }
     }
@@ -147,6 +161,39 @@ public sealed class TelegramUpdateDispatcherTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ExecuteAsync_UpdateRunsPastTheLimit_IsCancelledAndItsChatMovesOn()
+    {
+        var started = _time.GetUtcNow();
+        await StartAsync([Command(10, ChatA, "/stats"), Command(11, ChatA, "/ping")]);
+        await _statsAsked.Task.WaitAsync(Patience);
+
+        await AdvanceUntilRepliedAsync();
+
+        _replies.Should().Equal((ChatA, Pong));
+        (_time.GetUtcNow() - started).Should().BeGreaterThanOrEqualTo(UpdateLimit).And.BeLessThan(UpdateLimit + TimeStep);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_UpdateIgnoresCancellation_IsAbandonedAndItsChatMovesOn()
+    {
+        // A handler stuck on something that never looks at its token — the kind of hang no timeout below reaches.
+        _events.GetStatsAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                _statsAsked.TrySetResult();
+                return _stats.Task;
+            });
+        var started = _time.GetUtcNow();
+        await StartAsync([Command(10, ChatA, "/stats"), Command(11, ChatA, "/ping")]);
+        await _statsAsked.Task.WaitAsync(Patience);
+
+        await AdvanceUntilRepliedAsync();
+
+        _replies.Should().Equal((ChatA, Pong));
+        (_time.GetUtcNow() - started).Should().BeGreaterThanOrEqualTo(UpdateLimit + TelegramUpdateDispatcher.AbandonGrace);
+    }
+
+    [Fact]
     public async Task StopAsync_UpdateStillBeingHandled_CancelsItAndStops()
     {
         var sut = await StartAsync([Command(10, ChatA, "/stats")]);
@@ -168,6 +215,26 @@ public sealed class TelegramUpdateDispatcherTests : IAsyncLifetime
         _sut = Sut();
         await _sut.StartAsync(CancellationToken.None);
         return _sut;
+    }
+
+    /// <summary>
+    /// Moves the fake clock on a step at a time until a reply lands. Stepping, rather than one jump, keeps the
+    /// test from racing the handler: a timer it arms a moment later still comes due on a later step.
+    /// </summary>
+    private async Task AdvanceUntilRepliedAsync()
+    {
+        for (var step = 0; step < 80; step++)
+        {
+            if (await _replied.Reader.WaitToReadAsync().AsTask().WaitAsync(TimeSpan.FromMilliseconds(50)).ContinueWith(t => t.IsCompletedSuccessfully))
+            {
+                _replied.Reader.TryRead(out _);
+                return;
+            }
+
+            _time.Advance(TimeStep);
+        }
+
+        throw new TimeoutException("No reply after advancing the clock past the update limit and its grace.");
     }
 
     private async Task NextReplyAsync() => await _replied.Reader.ReadAsync().AsTask().WaitAsync(Patience);
@@ -212,7 +279,7 @@ public sealed class TelegramUpdateDispatcherTests : IAsyncLifetime
             revealable,
             Substitute.For<IAppVersion>(),
             new BotHealthSignal(),
-            Options.Create(new TelegramOptions { MaxConcurrentUpdates = 4 }),
+            Options.Create(new TelegramOptions { MaxConcurrentUpdates = 4, UpdateTimeLimitSeconds = (int)UpdateLimit.TotalSeconds }),
             _time,
             NullLogger<TelegramUpdateDispatcher>.Instance);
     }

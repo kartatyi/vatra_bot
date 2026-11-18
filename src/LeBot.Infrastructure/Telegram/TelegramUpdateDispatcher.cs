@@ -62,6 +62,13 @@ public sealed class TelegramUpdateDispatcher(
     private static readonly TimeSpan DrainTimeout = TimeSpan.FromSeconds(10);
 
     /// <summary>
+    /// How long an update that was told to stop at its time limit gets to wind down before its chat stops
+    /// waiting for it. Enough for a handler to unwind its awaits; a handler still going after that is stuck on
+    /// something that ignores cancellation, and the chat behind it shouldn't share its fate.
+    /// </summary>
+    internal static readonly TimeSpan AbandonGrace = TimeSpan.FromSeconds(30);
+
+    /// <summary>
     /// The lane for an update that belongs to no chat and no person — none of the kinds the bot subscribes to.
     /// Telegram never uses 0 as an id.
     /// </summary>
@@ -185,7 +192,7 @@ public sealed class TelegramUpdateDispatcher(
             return;
         }
 
-        scheduler.Enqueue(OrderingKeyOf(update), token => DispatchAsync(update, token), cancellationToken);
+        scheduler.Enqueue(OrderingKeyOf(update), token => DispatchWithinLimitAsync(update, token), cancellationToken);
     }
 
     /// <summary>
@@ -203,6 +210,40 @@ public sealed class TelegramUpdateDispatcher(
         { ChosenInlineResult: { } chosen } => chosen.From.Id,
         _ => NoChatLane,
     };
+
+    /// <summary>
+    /// Handles <paramref name="update"/> within <see cref="TelegramOptions.UpdateTimeLimitSeconds"/>. Past it the
+    /// handler is cancelled; one that still hasn't finished <see cref="AbandonGrace"/> later is left running on
+    /// its own, so the chat's next update goes ahead instead of waiting behind it for ever. The extractors'
+    /// own timeouts should fire long before this — it is the net under whatever they don't cover.
+    /// </summary>
+    private async Task DispatchWithinLimitAsync(Update update, CancellationToken stoppingToken)
+    {
+        var limit = TimeSpan.FromSeconds(Math.Max(1, _options.UpdateTimeLimitSeconds));
+        using var deadline = new CancellationTokenSource(limit, timeProvider);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, deadline.Token);
+
+        // Never faults: DispatchAsync is the per-update boundary and logs whatever goes wrong inside.
+        var handling = DispatchAsync(update, linked.Token);
+        try
+        {
+            await handling.WaitAsync(limit + AbandonGrace, timeProvider, stoppingToken);
+        }
+        catch (TimeoutException)
+        {
+            using var abandoned = logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = update.Id });
+            logger.LogError(
+                "Update {UpdateId} still running {Seconds}s after it was told to stop; abandoning it so its chat can move on",
+                update.Id, (int)AbandonGrace.TotalSeconds);
+            return;
+        }
+
+        if (deadline.IsCancellationRequested && !stoppingToken.IsCancellationRequested)
+        {
+            using var timedOut = logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = update.Id });
+            logger.LogWarning("Update {UpdateId} ran past {LimitSeconds}s and was cancelled", update.Id, (int)limit.TotalSeconds);
+        }
+    }
 
     private async Task DispatchAsync(Update update, CancellationToken cancellationToken)
     {
@@ -244,7 +285,7 @@ public sealed class TelegramUpdateDispatcher(
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // Shutting down; the update dies with the bot.
+            // Shutting down, or past its time limit — DispatchWithinLimitAsync tells the two apart and logs the latter.
         }
         catch (Exception ex)
         {
